@@ -40,8 +40,15 @@
       <header class="topbar"><button class="icon-btn mobile-menu" id="mobileMenu" aria-label="Abrir canais"><span data-icon="menu"></span></button><span class="top-channel-icon" id="topChannelIcon" data-icon="hash"></span><div class="top-channel"><strong id="currentChannelLabel">geral</strong><span class="top-sep"></span><small id="currentChannelTagline">Nosso cantinho de sempre</small></div><div class="top-actions"><span class="mode-pill" id="modePill"><span class="small-dot"></span> DEMO</span><button class="icon-btn" id="searchToggle" title="Pesquisar mensagens" aria-label="Pesquisar"><span data-icon="search"></span></button><button class="icon-btn right-toggle" id="memberToggle" title="Mostrar pessoas" aria-label="Mostrar pessoas"><span data-icon="users"></span></button><button class="invite-btn" id="inviteBtn"><span data-icon="user-plus"></span><span>Convidar</span></button></div></header>
       <div class="notice-bar" id="demoNotice"><span data-icon="sparkles"></span><span><strong>Modo demonstração.</strong> Explore a interface. Para conversar com amigos de verdade, conecte o Supabase.</span><button id="connectBtn">Como conectar <span data-icon="arrow-up-right"></span></button><button class="icon-btn close-notice" id="closeNotice" aria-label="Fechar aviso"><span data-icon="x"></span></button></div>
       <div class="search-drawer hidden" id="searchDrawer"><span data-icon="search"></span><input id="searchInput" placeholder="Pesquisar neste canal..." autocomplete="off" aria-label="Pesquisar mensagens"/><button class="icon-btn" id="closeSearch" aria-label="Fechar pesquisa"><span data-icon="x"></span></button></div>
+      <div id="chatVoiceBanner" class="chat-voice-banner hidden" role="region" aria-label="Chamada de voz ativa"></div>
       <div class="chat-scroll" id="chatScroll"><div id="chatMessages" class="messages"></div></div>
-      <div id="voiceStage" class="voice-stage hidden"></div>
+      <section id="mediaView" class="media-view hidden" aria-label="Painel da chamada">
+        <header class="media-view-top">
+          <button id="backToChat" class="media-back" type="button"><span aria-hidden="true">←</span> Voltar ao chat</button>
+          <div class="media-view-title"><strong id="mediaViewTitle">Chamada ao vivo</strong><small>Você continua conectado à voz ao voltar</small></div>
+        </header>
+        <div id="voiceStage" class="voice-stage hidden"></div>
+      </section>
       <div class="composer-wrap"><form class="composer" id="messageForm"><button type="button" class="composer-plus" id="attachBtn" title="Aetims em uma próxima versão" aria-label="Anexar">+</button><input type="text" id="messageInput" maxlength="2000" autocomplete="off" placeholder="Mensagem em #geral" aria-label="Mensagem"/><button class="emoji-button" type="button" id="emojiBtn" title="Adicionar emoji" aria-label="Adicionar emoji">☺</button><button type="submit" class="send-button" title="Enviar mensagem" aria-label="Enviar"><span data-icon="arrow-up"></span></button></form><div class="composer-foot"><span id="typingHint">Enter para enviar sua mensagem</span><span>feito pra ficar perto <span class="foot-heart">♥</span></span></div></div>
     </main>
 
