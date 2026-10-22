@@ -80,6 +80,7 @@
     voiceSession:null,voiceWatchdog:null,signalTasks:new Map(),earlyIce:new Map(),
     voiceDepartures:new Map(),voicePresenceHeartbeat:0,
     videoHealth:new Map(),videoDiagnosticsBusy:false,mediaOpen:false,speaking:new Map(),audioMonitors:new Map(),speechTimer:null,
+    micRepairInProgress:false,micRepairTimer:null,voiceDiagnostics:new Map(),
     voiceSounds:safeJSON('etim_voice_sounds',true)
   };
   let voiceAudioContext=null;
@@ -496,6 +497,7 @@
       refreshPresence();
       syncPeers();
       inspectRemoteVideo().catch(e=>console.warn('Diagnóstico de vídeo:',e));
+      verifyMicrophone().catch(e=>console.warn('Microfone:',e));
       const now=Date.now();
       for(const peer of [...state.peers.values()]){
         if(peer.pc.connectionState==='connected')continue;
@@ -532,6 +534,7 @@
     }
     if(state.voiceRoom!==room||state.voiceSession!==joiningSession){stream.getTracks().forEach(t=>t.stop());return}
     state.microphone=stream;monitorTrack(myId(),stream.getAudioTracks()[0]);
+    attachMicrophoneWatch(stream.getAudioTracks()[0]);
     await updatePresence();
     renderChannels();renderVoiceStage();
     if(state.live){await loadTurnServers();if(state.voiceRoom===room&&state.voiceSession===joiningSession){syncPeers();beginVoiceWatch()}}
@@ -548,6 +551,7 @@
     for(const id of [...state.peers.keys()])closePeer(id);
     state.earlyIce.clear();state.signalTasks.clear();
     const mic=state.microphone;state.microphone=null;
+    clearTimeout(state.micRepairTimer);state.micRepairTimer=null;
     if(mic)mic.getTracks().forEach(t=>t.stop());stopMonitor(myId());
     renderChannels();renderVoiceStage();
     await stopScreen();await stopCamera();
@@ -599,7 +603,8 @@
       id,pc,audioSender:audioTrans.sender,cameraSender:cameraTrans.sender,
       screenSender:screenTrans.sender,screenTrans,
       audio:null,callId:null,offering:false,offerSent:false,helloSent:false,
-      lastAttempt:Date.now(),attempts:0,warned:false,responded:false,ready:null
+      lastAttempt:Date.now(),attempts:0,warned:false,responded:false,ready:null,
+      pendingMediaOffer:false,renegotiating:false
     };
     state.peers.set(id,peer); // Registra antes do primeiro await: impede conexões duplicadas.
     peer.ready=Promise.all([
@@ -672,10 +677,15 @@
     };
     return peer;
   }
-  async function offerPeer(peer){
+  async function offerPeer(peer,force=false){
     if(!peer||state.peers.get(peer.id)!==peer||myId()>=peer.id)return;
-    if(peer.offering||peer.offerSent||peer.pc.signalingState!=='stable')return;
+    if(peer.offering||peer.pc.signalingState!=='stable'){
+      if(force)peer.pendingMediaOffer=true;
+      return;
+    }
+    if(peer.offerSent&&!force)return;
     peer.offering=true;
+    peer.pendingMediaOffer=false;
     try{
       await peer.ready;
       if(state.peers.get(peer.id)!==peer||!state.voiceRoom)return;
@@ -719,6 +729,12 @@
   }
   async function handleSignal(p){
     if(!state.live||!state.voiceRoom||!state.microphone)return;
+    if(p.kind==='media-update'){
+      if(myId()>=p.from)return;
+      const peer=ensurePeer(p.from);
+      await offerPeer(peer,true);
+      return;
+    }
     if(p.kind==='hello'){
       if(myId()>=p.from)return; // Só o lado eleito como iniciador oferece.
       let peer=ensurePeer(p.from);
@@ -741,10 +757,16 @@
     if(p.kind==='offer'){
       if(myId()<p.from){console.warn('Oferta fora da ordem esperada, ignorada');return}
       let peer=state.peers.get(p.from);
-      if(peer&&peer.callId!==p.connectionId){closePeer(p.from);peer=null}
       if(!peer)peer=ensurePeer(p.from);
       if(peer.responded&&peer.callId===p.connectionId)return;
+      // Uma nova oferta no mesmo par representa renegociação de mídia,
+      // não uma razão para destruir áudio, câmera e ICE estabelecidos.
+      if(peer.pc.signalingState!=='stable'&&peer.pc.signalingState!=='have-remote-offer'){
+        console.warn('etim: oferta fora da ordem',peer.pc.signalingState);
+        return;
+      }
       peer.callId=p.connectionId;
+      peer.responded=false;
       peer.lastAttempt=Date.now();
       await peer.ready;
       await peer.pc.setRemoteDescription(p.description);
@@ -760,10 +782,23 @@
       if(!peer||peer.callId!==p.connectionId||peer.pc.signalingState!=='have-local-offer')return;
       await peer.pc.setRemoteDescription(p.description);
       await flushEarlyIce(peer);
+      if(peer.pendingMediaOffer){
+        peer.pendingMediaOffer=false;
+        await offerPeer(peer,true);
+      }
     }
   }
-  // As faixas de video ja sao negociadas desde o inicio (transceivers sendrecv).
-  // replaceTrack troca a origem SEM destruir a conexao de audio/video existente.
+  // Troca fonte mantendo conexão e em seguida atualiza SDP para navegadores
+  // que não iniciam o envio de vídeo depois de replaceTrack(null -> track).
+  function requestMediaRenegotiation(){
+    if(!state.live||!state.voiceRoom)return;
+    for(const id of roomRemoteIds()){
+      const peer=state.peers.get(id);
+      if(!peer)continue;
+      if(myId()<id)offerPeer(peer,true).catch(err=>console.warn('Renegociar:',err));
+      else signal(id,{kind:'media-update'}).catch(err=>console.warn('Avisar mídia:',err));
+    }
+  }
   async function refreshMediaConnections(kind,track){
     if(!state.live||!state.voiceRoom)return;
     const senderName=kind==='camera'?'cameraSender':'screenSender';
@@ -778,6 +813,8 @@
       console.warn('etim: falha ao transmitir '+kind,failed.map(x=>x.reason));
       debounceToast('Falha ao enviar '+(kind==='camera'?'a câmera':'a tela')+' para alguém. Tente Reconectar.',true);
     }
+    // O emissor renegocia as faixas existentes, sem reiniciar a conexão.
+    if(track)requestMediaRenegotiation();
   }
   // Indicadores locais, sem enviar videos ou informações pessoais ao servidor.
   // Distingue player bloqueado de ausência de quadros WebRTC.
@@ -862,9 +899,75 @@
     if(state.voiceSounds)voiceCue('join');
     renderVoiceStage();
   }
+  function attachMicrophoneWatch(track){
+    if(!track)return;
+    track.onended=()=>{
+      if(state.voiceRoom&&!state.muted){
+        debounceToast('O microfone foi desconectado. Tentando recuperar...',true);
+        repairMicrophone();
+      }
+    };
+    track.onmute=()=>{
+      if(state.voiceRoom&&!state.muted){
+        clearTimeout(state.micRepairTimer);
+        state.micRepairTimer=setTimeout(()=>{
+          if(track.muted&&track.readyState==='live'&&state.voiceRoom&&!state.muted)
+            repairMicrophone();
+        },3500);
+      }
+    };
+    track.onunmute=()=>{clearTimeout(state.micRepairTimer);state.micRepairTimer=null};
+  }
+  async function verifyMicrophone(){
+    if(!state.live||!state.voiceRoom||state.muted)return;
+    const track=state.microphone?.getAudioTracks()[0];
+    if(!track||track.readyState!=='live'||track.muted){
+      await repairMicrophone();
+      return;
+    }
+    for(const peer of state.peers.values()){
+      if(peer.audioSender.track!==track){
+        try{await peer.audioSender.replaceTrack(track)}
+        catch(e){console.warn('Reanexar áudio ao participante:',e)}
+      }
+    }
+  }
+  async function repairMicrophone(){
+    if(state.micRepairInProgress||!state.voiceRoom||state.muted||!navigator.mediaDevices?.getUserMedia)return;
+    state.micRepairInProgress=true;
+    const oldStream=state.microphone,session=state.voiceSession;
+    try{
+      const next=await navigator.mediaDevices.getUserMedia({
+        audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false
+      });
+      if(state.voiceSession!==session||!state.voiceRoom){next.getTracks().forEach(t=>t.stop());return}
+      const newTrack=next.getAudioTracks()[0];
+      if(!newTrack)throw new Error('Nenhum microfone disponível');
+      state.microphone=next;
+      monitorTrack(myId(),newTrack);
+      attachMicrophoneWatch(newTrack);
+      await Promise.allSettled([...state.peers.values()].map(p=>p.audioSender.replaceTrack(newTrack)));
+      oldStream?.getTracks().forEach(t=>{t.onended=null;t.onmute=null;t.stop()});
+      requestMediaRenegotiation();
+      debounceToast('Microfone reconectado.');
+    }catch(e){console.warn('Não foi possível recuperar o microfone',e)}
+    finally{state.micRepairInProgress=false}
+  }
   async function toggleMute(){
     if(!state.voiceRoom)return;
-    state.muted=!state.muted;state.microphone?.getAudioTracks().forEach(t=>t.enabled=!state.muted);await updatePresence();renderVoiceStage();
+    state.muted=!state.muted;
+    const local=state.microphone?.getAudioTracks()[0];
+    if(!state.muted&&(!local||local.readyState!=='live')){
+      await repairMicrophone();
+    }else{
+      state.microphone?.getAudioTracks().forEach(t=>t.enabled=!state.muted);
+      for(const peer of state.peers.values()){
+        if(peer.audioSender.track!==local&&local){
+          try{await peer.audioSender.replaceTrack(local)}catch(e){console.warn('Reativar envio de áudio:',e)}
+        }
+      }
+    }
+    await updatePresence();renderVoiceStage();
   }
   async function startCamera(){
     if(!state.voiceRoom){debounceToast('Entre em uma sala de voz antes de ligar a câmera.',true);return}
