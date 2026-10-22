@@ -661,7 +661,7 @@
     if(p.kind==='hello'){
       if(myId()>=p.from)return; // Só o lado eleito como iniciador oferece.
       let peer=ensurePeer(p.from);
-      if(p.reset&&Date.now()-peer.lastAttempt>3500){
+      if(p.reset&&(p.force||Date.now()-peer.lastAttempt>3500)){
         closePeer(p.from);peer=ensurePeer(p.from);
       }
       await offerPeer(peer);
@@ -699,6 +699,21 @@
       if(!peer||peer.callId!==p.connectionId||peer.pc.signalingState!=='have-local-offer')return;
       await peer.pc.setRemoteDescription(p.description);
       await flushEarlyIce(peer);
+    }
+  }
+  // Video ativado depois da call iniciar pode exigir um novo SDP em Safari/iOS.
+  // Renegociamos apenas o par afetado, preservando as outras conversas.
+  function refreshMediaConnections(){
+    if(!state.live||!state.voiceRoom)return;
+    for(const id of roomRemoteIds()){
+      if(myId()<id){
+        closePeer(id);
+        const peer=ensurePeer(id);
+        offerPeer(peer).catch(err=>console.warn('Atualizacao de midia:',err));
+      }else{
+        signal(id,{kind:'hello',reset:true,force:true})
+          .catch(err=>console.warn('Solicitacao de video:',err));
+      }
     }
   }
   function recoverPeer(id,reason){
@@ -750,6 +765,7 @@
       if(!state.voiceRoom){stream.getTracks().forEach(t=>t.stop());return}
       state.camera=stream;const track=stream.getVideoTracks()[0];track.onended=()=>stopCamera();
       for(const p of state.peers.values())await p.cameraSender.replaceTrack(track);
+      refreshMediaConnections();
       await updatePresence();renderVoiceStage();
       if(!state.live)debounceToast('Prévia local: na demonstração, ninguém recebe sua câmera.');
     }catch(err){if(err.name!=='NotAllowedError')debounceToast('Não foi possível ligar a câmera: '+err.message,true);else debounceToast('Permissão de câmera não concedida.',true)}
@@ -768,6 +784,7 @@
       const screen=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:15},audio:false});
       state.screen=screen;const track=screen.getVideoTracks()[0];track.onended=()=>stopScreen();
       for(const p of state.peers.values())await p.screenSender.replaceTrack(track);
+      refreshMediaConnections();
       await updatePresence();renderVoiceStage();
       if(!state.live)debounceToast('Prévia local: seus amigos não recebem a tela na demonstração.');
     }catch(e){if(e.name!=='NotAllowedError')debounceToast('Não foi possível compartilhar a tela: '+e.message,true)}
@@ -778,6 +795,8 @@
     for(const p of state.peers.values())try{await p.screenSender.replaceTrack(null)}catch(e){console.warn(e)}
     old.getTracks().forEach(t=>{t.onended=null;t.stop()});await updatePresence();renderVoiceStage();
   }
+  // Mantem os players montados. Recriar <video> em toda atualizacao do Presence
+  // interrompia streams WebRTC e podia deixar tela preta no Safari/iPhone.
   function renderVoiceStage(){
     const stage=$('#voiceStage'),connected=!!state.voiceRoom;
     stage.classList.toggle('hidden',!connected);$('#voiceTray').classList.toggle('hidden',!connected);if(!connected)return;
@@ -790,14 +809,45 @@
     const participants=state.live?people:[{id:myId(),nickname:state.profile.nickname,color:state.profile.color,isMuted:state.muted,isCameraOn:!!state.camera}];
     const remoteScreens=[...state.remoteVideos.entries()].filter(([id,s])=>s.active&&state.peers.has(id));
     const remoteCameras=[...state.remoteCameras.entries()].filter(([id,s])=>s.active&&state.peers.has(id));
-    const cameraTiles=(state.camera?`<div class="video-tile is-camera"><video id="myCameraPreview" autoplay muted playsinline></video><span class="video-tile-label">Sua câmera · ${state.live?'ao vivo':'prévia local'}</span></div>`:'')+
-      remoteCameras.map(([id])=>`<div class="video-tile is-camera is-remote-camera"><video autoplay playsinline id="cam-${esc(id)}"></video><span class="video-tile-label">Câmera de ${esc(state.memberMap.get(id)?.nickname||'Amigo')}</span></div>`).join('');
-    const screenTiles=(state.screen?`<div class="video-tile is-screen"><video id="myScreenPreview" autoplay muted playsinline></video><span class="video-tile-label">Sua tela · ${state.live?'transmitindo':'prévia local'}</span></div>`:'')+
-      remoteScreens.map(([id])=>`<div class="video-tile is-screen"><video autoplay playsinline id="remote-${esc(id)}"></video><span class="video-tile-label">Tela de ${esc(state.memberMap.get(id)?.nickname||'Amigo')}</span></div>`).join('');
-    stage.innerHTML=`<div class="voice-stage-header"><div class="stage-icon">${icon('radio')}</div><div><h3>Você está na ${esc(voiceName(state.voiceRoom))}</h3><p>${state.live?'Áudio, câmera e tela em WebRTC · experimental':'Modo demonstração · prévia local de microfone, câmera e tela'}</p></div><span class="mode-pill ${state.live?'live':''}">${state.live?'AO VIVO':'DEMO'}</span></div>
+    const cameraTiles=(state.camera?`<div class="video-tile is-camera"><video id="myCameraPreview" autoplay muted playsinline></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-tile-label">Sua câmera · ${state.live?'ao vivo':'prévia local'}</span></div>`:'')+
+      remoteCameras.map(([id])=>`<div class="video-tile is-camera is-remote-camera"><video autoplay muted playsinline id="cam-${esc(id)}"></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-tile-label">Câmera de ${esc(state.memberMap.get(id)?.nickname||'Amigo')}</span></div>`).join('');
+    const screenTiles=(state.screen?`<div class="video-tile is-screen"><video id="myScreenPreview" autoplay muted playsinline></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-tile-label">Sua tela · ${state.live?'transmitindo':'prévia local'}</span></div>`:'')+
+      remoteScreens.map(([id])=>`<div class="video-tile is-screen"><video autoplay muted playsinline id="remote-${esc(id)}"></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-tile-label">Tela de ${esc(state.memberMap.get(id)?.nickname||'Amigo')}</span></div>`).join('');
+    const nextMarkup=`<div class="voice-stage-header"><div class="stage-icon">${icon('radio')}</div><div><h3>Você está na ${esc(voiceName(state.voiceRoom))}</h3><p>${state.live?'Áudio, câmera e tela em WebRTC · experimental':'Modo demonstração · prévia local de microfone, câmera e tela'}</p></div><span class="mode-pill ${state.live?'live':''}">${state.live?'AO VIVO':'DEMO'}</span></div>
       <div class="stage-participants">${participants.map(p=>`<div class="stage-person">${avatar(p.nickname,p.color,'voice-participant-avatar',ownPhoto(p.id))}<span class="voice-person-name">${esc(p.nickname||'Você')}${p.id===myId()?' (você)':''}</span><span class="voice-person-status" title="${p.isMuted?'Microfone silenciado':'Microfone ativo'}">${icon(p.isMuted?'mic-off':'mic')}</span>${p.isCameraOn?`<span title="Câmera ligada" class="voice-person-status">${icon('video')}</span>`:''}</div>`).join('')||'<span style="color:#9e98b9">Conectando...</span>'}</div>
-      <div class="stage-controls"><button id="muteVoice" class="${state.muted?'negative':''}">${icon(state.muted?'mic-off':'mic')}${state.muted?'Ativar mic':'Silenciar'}</button><button id="activateAudio">${icon('volume-2')}Ativar som</button><button id="reconnectVoice">${icon('radio')}Reconectar</button><button id="voiceSounds">${icon('volume-2')}Sons ${state.voiceSounds?'ligados':'desligados'}</button><button id="toggleCamera" class="${state.camera?'camera-on':''}">${icon(state.camera?'video-off':'video')}${state.camera?'Desligar câmera':'Ligar câmera'}</button><button id="shareScreen">${icon(state.screen?'monitor-off':'monitor-up')}${state.screen?'Parar transmissão':'Compartilhar tela'}</button><button class="danger" id="leaveVoice">${icon('phone-off')}Sair da sala</button></div>
-      ${(cameraTiles||screenTiles)?`<div class="video-grid">${cameraTiles}${screenTiles}</div>`:''}`;
+      <div class="stage-controls"><button id="muteVoice" class="${state.muted?'negative':''}">${icon(state.muted?'mic-off':'mic')}${state.muted?'Ativar mic':'Silenciar'}</button><button id="activateAudio">${icon('volume-2')}Ativar som</button><button id="reconnectVoice">${icon('radio')}Reconectar</button><button id="voiceSounds">${icon('volume-2')}Sons ${state.voiceSounds?'ligados':'desligados'}</button><button id="toggleCamera" class="${state.camera?'camera-on':''}">${icon(state.camera?'video-off':'video')}${state.camera?'Desligar câmera':'Ligar câmera'}</button><button id="shareScreen" ${!state.screen&&!navigator.mediaDevices?.getDisplayMedia?'disabled title="Neste navegador, você pode assistir à tela compartilhada pelos amigos"':''}>${icon(state.screen?'monitor-off':'monitor-up')}${state.screen?'Parar transmissão':'Compartilhar tela'}</button><button class="danger" id="leaveVoice">${icon('phone-off')}Sair da sala</button></div>
+      <div class="video-grid">${cameraTiles}${screenTiles}</div>`;
+    // Atualiza somente cabeçalho, pessoas e controles. A grade e os elementos
+    // de vídeo continuam vivos, sem recriar srcObject a cada heartbeat.
+    const candidate=document.createElement('div');
+    candidate.innerHTML=nextMarkup;
+    if(stage.dataset.room!==state.voiceRoom||!stage.querySelector('.video-grid')){
+      stage.innerHTML=nextMarkup;
+      stage.dataset.room=state.voiceRoom;
+    }else{
+      for(const selector of ['.voice-stage-header','.stage-participants','.stage-controls']){
+        const prev=stage.querySelector(selector),next=candidate.querySelector(selector);
+        if(prev&&next)prev.replaceWith(next);
+      }
+      const previousGrid=stage.querySelector('.video-grid');
+      const incomingGrid=candidate.querySelector('.video-grid');
+      const desired=new Set();
+      for(const incomingTile of Array.from(incomingGrid.children)){
+        const video=incomingTile.querySelector('video');
+        if(!video?.id)continue;
+        desired.add(video.id);
+        const existing=Array.from(previousGrid.children).find(el=>el.querySelector('video')?.id===video.id);
+        if(existing){
+          // Mantém o player para não interromper a decodificação WebRTC.
+          const label=existing.querySelector('.video-tile-label');
+          const incomingLabel=incomingTile.querySelector('.video-tile-label');
+          if(label&&incomingLabel)label.textContent=incomingLabel.textContent;
+        }else previousGrid.appendChild(incomingTile);
+      }
+      for(const tile of Array.from(previousGrid.children)){
+        if(!desired.has(tile.querySelector('video')?.id))tile.remove();
+      }
+    }
     $('#muteVoice').onclick=toggleMute;
     $('#activateAudio').onclick=activateRemoteAudio;
     $('#reconnectVoice').onclick=reconnectVoice;
@@ -805,14 +855,38 @@
     $('#toggleCamera').onclick=()=>state.camera?stopCamera():startCamera();
     $('#shareScreen').onclick=()=>state.screen?stopScreen():startScreen();
     $('#leaveVoice').onclick=leaveVoice;
-    if(state.camera){const video=$('#myCameraPreview');if(video){video.srcObject=state.camera;video.play().catch(()=>{})}}
-    if(state.screen){const video=$('#myScreenPreview');if(video){video.srcObject=state.screen;video.play().catch(()=>{})}}
-    for(const [id,info] of remoteScreens){const v=document.getElementById('remote-'+id);if(v){v.srcObject=info.stream;v.play().catch(()=>{})}}
-    for(const [id,info] of remoteCameras){const v=document.getElementById('cam-'+id);if(v){v.srcObject=info.stream;v.play().catch(()=>{})}}
+    const attach=(video,stream)=>{
+      if(!video||!stream)return;
+      // Fluxos de vídeo não devem reproduzir som: o áudio é controlado separadamente.
+      video.muted=true;video.playsInline=true;video.setAttribute('playsinline','');
+      if(video.srcObject!==stream)video.srcObject=stream;
+      const retry=video.closest('.video-tile')?.querySelector('[data-video-retry]');
+      // Tentar sem substituir o player, e oferecer um botão se o Safari bloquear.
+      if(!video.paused&&!retry?.classList.contains('hidden'))retry.classList.add('hidden');
+      if(video.paused)video.play().then(()=>{
+        retry?.classList.add('hidden');
+      }).catch(err=>{
+        console.warn('etim: vídeo aguardando toque para reproduzir',err);
+        retry?.classList.remove('hidden');
+      });
+    };
+    attach($('#myCameraPreview'),state.camera);
+    attach($('#myScreenPreview'),state.screen);
+    for(const [id,info] of remoteScreens)attach(document.getElementById('remote-'+id),info.stream);
+    for(const [id,info] of remoteCameras)attach(document.getElementById('cam-'+id),info.stream);
   }
   function setupEvents(){
     $('#textChannels').addEventListener('click',e=>{const btn=e.target.closest('[data-text]');if(btn)switchChannel(btn.dataset.text)});
     $('#voiceChannels').addEventListener('click',e=>{const btn=e.target.closest('[data-voice]');if(btn)joinVoice(btn.dataset.voice)});
+    $('#voiceStage').addEventListener('click',e=>{
+      const btn=e.target.closest('[data-video-retry]');
+      if(!btn)return;
+      const video=btn.closest('.video-tile')?.querySelector('video');
+      if(!video)return;
+      video.muted=true;
+      video.play().then(()=>btn.classList.add('hidden'))
+        .catch(()=>debounceToast('O navegador bloqueou o vídeo. Tente novamente.',true));
+    });
     $('#messageForm').addEventListener('submit',sendMessage);
     $('#searchToggle').onclick=()=>{$('#searchDrawer').classList.toggle('hidden');if(!$('#searchDrawer').classList.contains('hidden'))$('#searchInput').focus();else{state.search='';renderMessages()}};
     $('#searchInput').oninput=e=>{state.search=e.target.value;renderMessages()};
