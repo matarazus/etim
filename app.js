@@ -79,7 +79,7 @@
     noticeClosed:false, loading:false, audioPromptAt:0,
     voiceSession:null,voiceWatchdog:null,signalTasks:new Map(),earlyIce:new Map(),
     voiceDepartures:new Map(),voicePresenceHeartbeat:0,
-    videoHealth:new Map(),videoDiagnosticsBusy:false,
+    videoHealth:new Map(),videoDiagnosticsBusy:false,mediaOpen:false,speaking:new Map(),audioMonitors:new Map(),speechTimer:null,
     voiceSounds:safeJSON('etim_voice_sounds',true)
   };
   let voiceAudioContext=null;
@@ -118,11 +118,57 @@
   const timestamp = v => {if(!v)return '';if(/^\d\d:\d\d$/.test(v))return v;try{return new Date(v).toLocaleTimeString('pt-BR',{hour:'2-digit',minute:'2-digit'})}catch{return ''}};
   const getMessages = id => state.live ? (state.liveChat[id]||[]) : (sampleChat[id]||[]).concat(state.demoChat[id]||[]);
   function loadIcons(root=document){$$('[data-icon]',root).forEach(el=>{el.innerHTML=icon(el.dataset.icon)})}
+  const isTalking=id=>!!state.speaking.get(id);
+  function openMedia(){if(!state.voiceRoom)return;state.mediaOpen=true;renderMediaView();renderVoiceStage();closeMobile()}
+  function backToChat(){state.mediaOpen=false;renderMediaView()}
+  function renderMediaView(){
+    const active=!!state.voiceRoom,open=active&&state.mediaOpen;
+    $('#mediaView').classList.toggle('hidden',!open);
+    $('#chatScroll').classList.toggle('hidden',open);
+    $('.composer-wrap').classList.toggle('hidden',open);
+    $('#chatVoiceBanner').classList.toggle('hidden',!active||open);
+    if(active){
+      $('#mediaViewTitle').textContent=voiceName(state.voiceRoom);
+      const live=state.presence.filter(p=>p.voiceRoom===state.voiceRoom&&(p.isCameraOn||p.isStreaming)).length;
+      $('#chatVoiceBanner').innerHTML=`<strong>🎧 ${esc(voiceName(state.voiceRoom))}</strong><button type="button" id="openMediaBanner">${live?live+' ao vivo · ':''} Abrir chamada ↗</button>`;
+      if(!open)$('#openMediaBanner').onclick=openMedia;
+    }
+  }
+  function monitorTrack(id,track){
+    const prev=state.audioMonitors.get(id);if(prev){prev.source.disconnect();state.audioMonitors.delete(id)}
+    if(!track)return;
+    try{
+      const AudioCtx=window.AudioContext||window.webkitAudioContext;if(!AudioCtx)return;
+      if(!voiceAudioContext)voiceAudioContext=new AudioCtx();
+      const source=voiceAudioContext.createMediaStreamSource(new MediaStream([track]));
+      const analyser=voiceAudioContext.createAnalyser();analyser.fftSize=512;source.connect(analyser);
+      state.audioMonitors.set(id,{source,analyser,samples:new Uint8Array(512),last:0});
+      if(voiceAudioContext.state==='suspended')voiceAudioContext.resume().catch(()=>{});
+      if(!state.speechTimer)state.speechTimer=setInterval(()=>{
+        if(!state.voiceRoom)return;
+        const now=Date.now();
+        for(const [who,m] of state.audioMonitors){
+          m.analyser.getByteTimeDomainData(m.samples);let sum=0;
+          for(const v of m.samples){const s=(v-128)/128;sum+=s*s}
+          if(Math.sqrt(sum/m.samples.length)>.035)m.last=now;
+          const on=now-m.last<380&&(who!==myId()||!state.muted);
+          if(on!==isTalking(who)){
+            state.speaking.set(who,on);
+            document.querySelectorAll('[data-speaker-id]').forEach(el=>{
+              if(el.dataset.speakerId===who)el.classList.toggle('is-speaking',on);
+            });
+            if(who===myId())$('#myAvatar').classList.toggle('is-speaking',on);
+          }
+        }
+      },110);
+    }catch(err){console.warn('Indicador de fala:',err)}
+  }
+  function stopMonitor(id){const m=state.audioMonitors.get(id);if(m){m.source.disconnect();state.audioMonitors.delete(id)}state.speaking.delete(id)}
   function renderChannels(){
     $('#textChannels').innerHTML=channels.map(ch=>`<button class="channel-button ${ch.id===state.activeChannel?'active':''}" data-text="${ch.id}" aria-current="${ch.id===state.activeChannel?'page':'false'}">${icon(ch.icon)}<span>${esc(ch.name)}</span></button>`).join('');
     $('#voiceChannels').innerHTML=voiceChannels.map(ch=>{
       const users=state.live?state.presence.filter(p=>p.voiceRoom===ch.id):state.voiceRoom===ch.id?[{id:myId(),nickname:state.profile.nickname,color:state.profile.color,isMuted:state.muted}]:[];
-      return `<div><button class="channel-button ${state.voiceRoom===ch.id?'voice-active':''}" data-voice="${ch.id}" title="Entrar na sala ${esc(ch.name)}">${icon(ch.icon)}<span>${esc(ch.name)}</span>${users.length?`<small style="margin-left:auto;color:#7ad6ac">${users.length}</small>`:''}</button>${users.map(p=>`<div class="voice-person">${avatar(p.nickname,p.color,'voice-mini',ownPhoto(p.id))}<span>${esc(p.nickname)}${p.isMuted?' (mudo)':''}</span></div>`).join('')}</div>`;
+      return `<div><button class="channel-button ${state.voiceRoom===ch.id?'voice-active':''}" data-voice="${ch.id}" title="Entrar na sala ${esc(ch.name)}">${icon(ch.icon)}<span>${esc(ch.name)}</span>${users.length?`<small style="margin-left:auto;color:#7ad6ac">${users.length}</small>`:''}</button>${users.map(p=>`<div class="voice-person ${isTalking(p.id)?'is-speaking':''}" data-speaker-id="${esc(p.id)}">${avatar(p.nickname,p.color,'voice-mini',ownPhoto(p.id))}<span>${esc(p.nickname)}${p.isMuted?' (mudo)':''}</span>${p.isStreaming?`<button class="watch-media" data-watch="${esc(p.id)}">● Ao vivo</button>`:p.isCameraOn?`<button class="watch-media" data-watch="${esc(p.id)}">Câmera</button>`:''}</div>`).join('')}</div>`;
     }).join('');
   }
   function renderHeader(){const ch=channelOf(state.activeChannel);$('#currentChannelLabel').textContent=ch.name;$('#currentChannelTagline').textContent=ch.desc;$('#topChannelIcon').innerHTML=icon(ch.icon);$('#messageInput').placeholder=`Mensagem em #${ch.name}`;}
@@ -380,7 +426,7 @@
       if([...newIds].some(id=>!oldIds.has(id)))voiceCue('join');
       else if([...oldIds].some(id=>!newIds.has(id)))voiceCue('leave');
     }
-    renderChannels();renderMembers();renderVoiceStage();
+    renderChannels();renderMembers();renderMediaView();renderVoiceStage();
     const knownIds=new Set(state.members.map(m=>m.user_id));
     if(state.presence.some(p=>!knownIds.has(p.id)))fetchMembers();
   }
@@ -463,7 +509,7 @@
     },5000);
   }
   async function joinVoice(room){
-    if(state.voiceRoom===room){renderVoiceStage();closeMobile();return}
+    if(state.voiceRoom===room){openMedia();return}
     if(state.voiceRoom)await leaveVoice(true);
     // Criar/retomar o AudioContext no clique ajuda o Safari a reproduzir os sons e a voz.
     voiceCue('join');
@@ -485,7 +531,7 @@
       debounceToast('Microfone indisponível. Você entrou apenas para ouvir.',true);
     }
     if(state.voiceRoom!==room||state.voiceSession!==joiningSession){stream.getTracks().forEach(t=>t.stop());return}
-    state.microphone=stream;
+    state.microphone=stream;monitorTrack(myId(),stream.getAudioTracks()[0]);
     await updatePresence();
     renderChannels();renderVoiceStage();
     if(state.live){await loadTurnServers();if(state.voiceRoom===room&&state.voiceSession===joiningSession){syncPeers();beginVoiceWatch()}}
@@ -498,11 +544,11 @@
     clearInterval(state.voiceWatchdog);state.voiceWatchdog=null;
     // Anuncia a saida antes do Presence se atualizar; protege contra snapshots atrasados.
     const notice=announceVoiceExit(oldRoom,oldSession);
-    state.voiceRoom=null;state.voiceSession=null;state.voicePresenceHeartbeat=0;
+    state.voiceRoom=null;state.voiceSession=null;state.voicePresenceHeartbeat=0;state.mediaOpen=false;
     for(const id of [...state.peers.keys()])closePeer(id);
     state.earlyIce.clear();state.signalTasks.clear();
     const mic=state.microphone;state.microphone=null;
-    if(mic)mic.getTracks().forEach(t=>t.stop());
+    if(mic)mic.getTracks().forEach(t=>t.stop());stopMonitor(myId());
     renderChannels();renderVoiceStage();
     await stopScreen();await stopCamera();
     state.muted=false;
@@ -518,7 +564,7 @@
       if(peer.audio){peer.audio.pause();peer.audio.srcObject=null;peer.audio.remove()}
       peer.pc.close();state.peers.delete(id);
     }
-    state.remoteVideos.delete(id);state.remoteCameras.delete(id);
+    state.remoteVideos.delete(id);state.remoteCameras.delete(id);stopMonitor(id);
     state.videoHealth.delete('cam:'+id);state.videoHealth.delete('screen:'+id);
   }
   function syncPeers(){
@@ -574,7 +620,7 @@
           audio.autoplay=true;audio.playsInline=true;audio.setAttribute('playsinline','');
           audio.style.display='none';audio.preload='auto';document.body.appendChild(audio);peer.audio=audio;
         }
-        audio.srcObject=new MediaStream([track]);audio.muted=false;audio.volume=1;
+        audio.srcObject=new MediaStream([track]);audio.muted=false;audio.volume=1;monitorTrack(id,track);
         function playIncoming(){
           if(state.peers.get(id)!==peer)return;
           audio.play().catch(err=>{
@@ -828,7 +874,7 @@
       if(!state.voiceRoom){stream.getTracks().forEach(t=>t.stop());return}
       state.camera=stream;const track=stream.getVideoTracks()[0];track.onended=()=>stopCamera();
       await refreshMediaConnections('camera',track);
-      await updatePresence();renderVoiceStage();
+      await updatePresence();openMedia();
       if(!state.live)debounceToast('Prévia local: na demonstração, ninguém recebe sua câmera.');
     }catch(err){if(err.name!=='NotAllowedError')debounceToast('Não foi possível ligar a câmera: '+err.message,true);else debounceToast('Permissão de câmera não concedida.',true)}
   }
@@ -846,7 +892,7 @@
       const screen=await navigator.mediaDevices.getDisplayMedia({video:{frameRate:15},audio:false});
       state.screen=screen;const track=screen.getVideoTracks()[0];track.onended=()=>stopScreen();
       await refreshMediaConnections('screen',track);
-      await updatePresence();renderVoiceStage();
+      await updatePresence();openMedia();
       if(!state.live)debounceToast('Prévia local: seus amigos não recebem a tela na demonstração.');
     }catch(e){if(e.name!=='NotAllowedError')debounceToast('Não foi possível compartilhar a tela: '+e.message,true)}
   }
@@ -860,7 +906,7 @@
   // interrompia streams WebRTC e podia deixar tela preta no Safari/iPhone.
   function renderVoiceStage(){
     const stage=$('#voiceStage'),connected=!!state.voiceRoom;
-    stage.classList.toggle('hidden',!connected);$('#voiceTray').classList.toggle('hidden',!connected);if(!connected)return;
+    stage.classList.toggle('hidden',!connected);$('#voiceTray').classList.toggle('hidden',!connected);renderMediaView();if(!connected)return;
     $('#voiceTrayRoom').textContent=voiceName(state.voiceRoom);
     const me=state.user||state.profile,mePhoto=ownPhoto(myId());
     $('#voiceTrayAvatar').style.background=me.color||'#897df1';
@@ -875,7 +921,7 @@
     const screenTiles=(state.screen?`<div class="video-tile is-screen"><video id="myScreenPreview" autoplay muted playsinline></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-tile-label">Sua tela · ${state.live?'transmitindo':'prévia local'}</span></div>`:'')+
       remoteScreens.map(([id])=>`<div class="video-tile is-screen"><video autoplay muted playsinline id="remote-${esc(id)}"></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-health hidden" data-video-health></span><span class="video-tile-label">Tela de ${esc(state.memberMap.get(id)?.nickname||'Amigo')}</span></div>`).join('');
     const nextMarkup=`<div class="voice-stage-header"><div class="stage-icon">${icon('radio')}</div><div><h3>Você está na ${esc(voiceName(state.voiceRoom))}</h3><p>${state.live?'Áudio, câmera e tela em WebRTC · experimental':'Modo demonstração · prévia local de microfone, câmera e tela'}</p></div><span class="mode-pill ${state.live?'live':''}">${state.live?'AO VIVO':'DEMO'}</span></div>
-      <div class="stage-participants">${participants.map(p=>`<div class="stage-person">${avatar(p.nickname,p.color,'voice-participant-avatar',ownPhoto(p.id))}<span class="voice-person-name">${esc(p.nickname||'Você')}${p.id===myId()?' (você)':''}</span><span class="voice-person-status" title="${p.isMuted?'Microfone silenciado':'Microfone ativo'}">${icon(p.isMuted?'mic-off':'mic')}</span>${p.isCameraOn?`<span title="Câmera ligada" class="voice-person-status">${icon('video')}</span>`:''}</div>`).join('')||'<span style="color:#9e98b9">Conectando...</span>'}</div>
+      <div class="stage-participants">${participants.map(p=>`<div class="stage-person ${isTalking(p.id)?'is-speaking':''}" data-speaker-id="${esc(p.id)}">${avatar(p.nickname,p.color,'voice-participant-avatar',ownPhoto(p.id))}<span class="voice-person-name">${esc(p.nickname||'Você')}${p.id===myId()?' (você)':''}</span><span class="voice-person-status" title="${p.isMuted?'Microfone silenciado':'Microfone ativo'}">${icon(p.isMuted?'mic-off':'mic')}</span>${p.isCameraOn?`<span title="Câmera ligada" class="voice-person-status">${icon('video')}</span>`:''}</div>`).join('')||'<span style="color:#9e98b9">Conectando...</span>'}</div>
       <div class="stage-controls"><button id="muteVoice" class="${state.muted?'negative':''}">${icon(state.muted?'mic-off':'mic')}${state.muted?'Ativar mic':'Silenciar'}</button><button id="activateAudio">${icon('volume-2')}Ativar som</button><button id="reconnectVoice">${icon('radio')}Reconectar</button><button id="voiceSounds">${icon('volume-2')}Sons ${state.voiceSounds?'ligados':'desligados'}</button><button id="toggleCamera" class="${state.camera?'camera-on':''}">${icon(state.camera?'video-off':'video')}${state.camera?'Desligar câmera':'Ligar câmera'}</button><button id="shareScreen" ${!state.screen&&!navigator.mediaDevices?.getDisplayMedia?'disabled title="Neste navegador, você pode assistir à tela compartilhada pelos amigos"':''}>${icon(state.screen?'monitor-off':'monitor-up')}${state.screen?'Parar transmissão':'Compartilhar tela'}</button><button class="danger" id="leaveVoice">${icon('phone-off')}Sair da sala</button></div>
       <div class="video-grid">${cameraTiles}${screenTiles}</div>`;
     // Atualiza somente cabeçalho, pessoas e controles. A grade e os elementos
@@ -946,7 +992,8 @@
   }
   function setupEvents(){
     $('#textChannels').addEventListener('click',e=>{const btn=e.target.closest('[data-text]');if(btn)switchChannel(btn.dataset.text)});
-    $('#voiceChannels').addEventListener('click',e=>{const btn=e.target.closest('[data-voice]');if(btn)joinVoice(btn.dataset.voice)});
+    $('#voiceChannels').addEventListener('click',e=>{const watch=e.target.closest('[data-watch]');if(watch){openMedia();return}const btn=e.target.closest('[data-voice]');if(btn)joinVoice(btn.dataset.voice)});
+    $('#backToChat').onclick=backToChat;
     $('#voiceStage').addEventListener('click',e=>{
       const btn=e.target.closest('[data-video-retry]');
       if(!btn)return;
