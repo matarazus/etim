@@ -878,6 +878,131 @@
       signal(id,{kind:'hello',reset:true}).catch(console.warn);
     }
   }
+  // Diagnostico local de WebRTC, sem IPs, IDs de conta, chaves ou tokens.
+  // Compara duas amostras RTP para ver se os pacotes/frames estao de fato fluindo.
+  async function rtpCount(transceiverPart, direction){
+    const result={packets:0,bytes:0,frames:0,available:false};
+    if(!transceiverPart||typeof transceiverPart.getStats!=='function')return result;
+    try{
+      const reports=await transceiverPart.getStats();
+      reports.forEach(stat=>{
+        if(stat.type!==(direction+'-rtp')||stat.isRemote)return;
+        result.available=true;
+        result.packets+=Number(stat.packetsSent??stat.packetsReceived??0);
+        result.bytes+=Number(stat.bytesSent??stat.bytesReceived??0);
+        result.frames+=Number(stat.framesEncoded??stat.framesDecoded??0);
+      });
+    }catch(err){console.warn('Estatistica RTP nao disponivel:',err)}
+    return result;
+  }
+  async function readVoiceStatistics(){
+    const local=state.microphone?.getAudioTracks()[0];
+    const camera=state.camera?.getVideoTracks()[0];
+    const screen=state.screen?.getVideoTracks()[0];
+    const report={
+      browser:/CriOS/i.test(navigator.userAgent)?'Chrome iOS':
+        /Chrome|Chromium|Edg/i.test(navigator.userAgent)?'Chrome/Chromium':
+        /Safari/i.test(navigator.userAgent)?'Safari':'Outro',
+      room:state.voiceRoom||'fora da sala',
+      microphone:local?{ready:local.readyState,enabled:local.enabled,muted:local.muted}:'ausente',
+      camera:camera?{ready:camera.readyState,enabled:camera.enabled,muted:camera.muted}:'desligada',
+      screen:screen?{ready:screen.readyState,enabled:screen.enabled,muted:screen.muted}:'desligada',
+      turnConfigured:turnServers.length>0,
+      peers:[]
+    };
+    for(const [id,peer] of state.peers){
+      const transceivers=peer.pc.getTransceivers();
+      const audio=transceivers.find(t=>t.sender===peer.audioSender);
+      const cam=transceivers.find(t=>t.sender===peer.cameraSender);
+      const scr=transceivers.find(t=>t.sender===peer.screenSender);
+      const [audioOut,audioIn,camOut,camIn,screenOut,screenIn]=await Promise.all([
+        rtpCount(peer.audioSender,'outbound'),rtpCount(audio?.receiver,'inbound'),
+        rtpCount(peer.cameraSender,'outbound'),rtpCount(cam?.receiver,'inbound'),
+        rtpCount(peer.screenSender,'outbound'),rtpCount(scr?.receiver,'inbound')
+      ]);
+      let route='nao detectada';
+      try{
+        const all=await peer.pc.getStats();
+        let pair=null;
+        all.forEach(row=>{
+          if(row.type==='transport'&&row.selectedCandidatePairId)pair=all.get(row.selectedCandidatePairId);
+          else if(row.type==='candidate-pair'&&row.selected&&!pair)pair=row;
+        });
+        if(pair){
+          const localCandidate=all.get(pair.localCandidateId);
+          route=localCandidate?.candidateType||'conectada (tipo desconhecido)';
+        }
+      }catch(err){console.debug('ICE stats indisponiveis',err)}
+      report.peers.push({
+        friend:state.memberMap.get(id)?.nickname||'Amigo',
+        connection:peer.pc.connectionState,
+        ice:peer.pc.iceConnectionState,signaling:peer.pc.signalingState,
+        route,
+        senderTrack:peer.audioSender.track?{
+          ready:peer.audioSender.track.readyState,
+          enabled:peer.audioSender.track.enabled,muted:peer.audioSender.track.muted
+        }:'nenhuma',
+        directions:{audio:audio?.currentDirection||null,camera:cam?.currentDirection||null,screen:scr?.currentDirection||null},
+        remoteAudioPaused:!!peer.audio?.paused,
+        audioOut,audioIn,camOut,camIn,screenOut,screenIn
+      });
+    }
+    return report;
+  }
+  function deltaStat(before,after,key){
+    if(!before||!after)return 'n/d';
+    const last=before[key],current=after[key];
+    if(!last?.available||!current?.available)return 'sem estatisticas';
+    return String(Math.max(0,current.packets-last.packets))+' pacotes, '+
+      String(Math.max(0,current.frames-last.frames))+' quadros';
+  }
+  async function showVoiceDiagnostics(){
+    if(!state.voiceRoom)return;
+    showModal('<div class="modal-mark">◉</div><h2>Diagnóstico da chamada</h2><p>Medindo pacotes enviados e recebidos durante 2 segundos...</p>');
+    try{
+      const first=await readVoiceStatistics();
+      await new Promise(resolve=>setTimeout(resolve,2100));
+      const second=await readVoiceStatistics();
+      const lines=[
+        'etim · diagnostico WebRTC',
+        'Navegador: '+second.browser,
+        'Microfone local: '+JSON.stringify(second.microphone),
+        'Camera local: '+JSON.stringify(second.camera),
+        'Tela local: '+JSON.stringify(second.screen),
+        'Credenciais TURN carregadas: '+(second.turnConfigured?'sim':'nao'),
+        'Participantes conectados: '+second.peers.length
+      ];
+      for(let i=0;i<second.peers.length;i++){
+        const p=second.peers[i],previous=first.peers[i];
+        lines.push(
+          '',
+          'Participante '+(i+1)+' ('+p.friend+')',
+          'Conexao: '+p.connection+' | ICE: '+p.ice+' | caminho: '+p.route,
+          'Sinalizacao: '+p.signaling+' | direcoes: '+JSON.stringify(p.directions),
+          'Faixa do microfone enviada: '+JSON.stringify(p.senderTrack),
+          'Audio ENVIADO (2s): '+deltaStat(previous,p,'audioOut'),
+          'Audio RECEBIDO (2s): '+deltaStat(previous,p,'audioIn'),
+          'Camera ENVIADA (2s): '+deltaStat(previous,p,'camOut'),
+          'Camera RECEBIDA (2s): '+deltaStat(previous,p,'camIn'),
+          'Tela ENVIADA (2s): '+deltaStat(previous,p,'screenOut'),
+          'Tela RECEBIDA (2s): '+deltaStat(previous,p,'screenIn'),
+          'Reproducao remota pausada: '+(p.remoteAudioPaused?'sim':'nao')
+        );
+      }
+      const result=lines.join('\n');
+      showModal('<div class="modal-mark">◉</div><h2>Diagnóstico WebRTC</h2>'+
+        '<p>Os valores representam o tráfego dos últimos 2 segundos. Zero pacotes de áudio enviado, enquanto você fala, indica problema no envio. Pacotes recebidos com silêncio indicam problema de reprodução ou conteúdo.</p>'+
+        '<pre id="voiceReport" class="voice-report">'+esc(result)+'</pre>'+
+        '<button class="primary" type="button" id="copyVoiceReport">Copiar diagnóstico</button>');
+      $('#copyVoiceReport').onclick=()=>{
+        if(navigator.clipboard?.writeText)navigator.clipboard.writeText(result).then(()=>debounceToast('Diagnóstico copiado!')).catch(()=>debounceToast('Não foi possível copiar.',true));
+        else debounceToast('Selecione e copie o texto do diagnóstico.',true);
+      };
+    }catch(error){
+      console.warn('Diagnóstico WebRTC:',error);
+      showModal('<h2>Diagnóstico indisponível</h2><p>Seu navegador não forneceu todas as estatísticas desta chamada.</p>');
+    }
+  }
   async function activateRemoteAudio(){
     if(!state.voiceRoom)return;
     // O clique desbloqueia reprodução no Safari e reativa o contexto de avisos.
@@ -1025,7 +1150,7 @@
       remoteScreens.map(([id])=>`<div class="video-tile is-screen"><video autoplay muted playsinline id="remote-${esc(id)}"></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-health hidden" data-video-health></span><span class="video-tile-label">Tela de ${esc(state.memberMap.get(id)?.nickname||'Amigo')}</span></div>`).join('');
     const nextMarkup=`<div class="voice-stage-header"><div class="stage-icon">${icon('radio')}</div><div><h3>Você está na ${esc(voiceName(state.voiceRoom))}</h3><p>${state.live?'Áudio, câmera e tela em WebRTC · experimental':'Modo demonstração · prévia local de microfone, câmera e tela'}</p></div><span class="mode-pill ${state.live?'live':''}">${state.live?'AO VIVO':'DEMO'}</span></div>
       <div class="stage-participants">${participants.map(p=>`<div class="stage-person ${isTalking(p.id)?'is-speaking':''}" data-speaker-id="${esc(p.id)}">${avatar(p.nickname,p.color,'voice-participant-avatar',ownPhoto(p.id))}<span class="voice-person-name">${esc(p.nickname||'Você')}${p.id===myId()?' (você)':''}</span><span class="voice-person-status" title="${p.isMuted?'Microfone silenciado':'Microfone ativo'}">${icon(p.isMuted?'mic-off':'mic')}</span>${p.isCameraOn?`<span title="Câmera ligada" class="voice-person-status">${icon('video')}</span>`:''}</div>`).join('')||'<span style="color:#9e98b9">Conectando...</span>'}</div>
-      <div class="stage-controls"><button id="muteVoice" class="${state.muted?'negative':''}">${icon(state.muted?'mic-off':'mic')}${state.muted?'Ativar mic':'Silenciar'}</button><button id="activateAudio">${icon('volume-2')}Ativar som</button><button id="reconnectVoice">${icon('radio')}Reconectar</button><button id="voiceSounds">${icon('volume-2')}Sons ${state.voiceSounds?'ligados':'desligados'}</button><button id="toggleCamera" class="${state.camera?'camera-on':''}">${icon(state.camera?'video-off':'video')}${state.camera?'Desligar câmera':'Ligar câmera'}</button><button id="shareScreen" ${!state.screen&&!navigator.mediaDevices?.getDisplayMedia?'disabled title="Neste navegador, você pode assistir à tela compartilhada pelos amigos"':''}>${icon(state.screen?'monitor-off':'monitor-up')}${state.screen?'Parar transmissão':'Compartilhar tela'}</button><button class="danger" id="leaveVoice">${icon('phone-off')}Sair da sala</button></div>
+      <div class="stage-controls"><button id="muteVoice" class="${state.muted?'negative':''}">${icon(state.muted?'mic-off':'mic')}${state.muted?'Ativar mic':'Silenciar'}</button><button id="activateAudio">${icon('volume-2')}Ativar som</button><button id="reconnectVoice">${icon('radio')}Reconectar</button><button id="diagnoseVoice">${icon('activity')}Diagnóstico</button><button id="voiceSounds">${icon('volume-2')}Sons ${state.voiceSounds?'ligados':'desligados'}</button><button id="toggleCamera" class="${state.camera?'camera-on':''}">${icon(state.camera?'video-off':'video')}${state.camera?'Desligar câmera':'Ligar câmera'}</button><button id="shareScreen" ${!state.screen&&!navigator.mediaDevices?.getDisplayMedia?'disabled title="Neste navegador, você pode assistir à tela compartilhada pelos amigos"':''}>${icon(state.screen?'monitor-off':'monitor-up')}${state.screen?'Parar transmissão':'Compartilhar tela'}</button><button class="danger" id="leaveVoice">${icon('phone-off')}Sair da sala</button></div>
       <div class="video-grid">${cameraTiles}${screenTiles}</div>`;
     // Atualiza somente cabeçalho, pessoas e controles. A grade e os elementos
     // de vídeo continuam vivos, sem recriar srcObject a cada heartbeat.
@@ -1061,6 +1186,7 @@
     $('#muteVoice').onclick=toggleMute;
     $('#activateAudio').onclick=activateRemoteAudio;
     $('#reconnectVoice').onclick=reconnectVoice;
+    $('#diagnoseVoice').onclick=showVoiceDiagnostics;
     $('#voiceSounds').onclick=toggleVoiceSounds;
     $('#toggleCamera').onclick=()=>state.camera?stopCamera():startCamera();
     $('#shareScreen').onclick=()=>state.screen?stopScreen():startScreen();
