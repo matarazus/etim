@@ -78,6 +78,7 @@
     liveChat:{}, search:'', muted:false, voiceRoom:null, microphone:null, screen:null, camera:null, peers:new Map(), remoteVideos:new Map(), remoteCameras:new Map(),
     noticeClosed:false, loading:false, audioPromptAt:0,
     voiceSession:null,voiceWatchdog:null,signalTasks:new Map(),earlyIce:new Map(),
+    voiceDepartures:new Map(),voicePresenceHeartbeat:0,
     voiceSounds:safeJSON('etim_voice_sounds',true)
   };
   let voiceAudioContext=null;
@@ -306,6 +307,7 @@
     state.channel=state.sb.channel('etim:lobby',{config:{private:true,broadcast:{ack:true},presence:{key:uid}}});
     state.channel.on('presence',{event:'sync'},()=>{refreshPresence();syncPeers()})
       .on('broadcast',{event:'signal'},({payload})=>queueSignal(payload))
+      .on('broadcast',{event:'voice-presence'},({payload})=>handleVoicePresenceEvent(payload))
       .on('postgres_changes',{event:'INSERT',schema:'public',table:'chat_messages'},({new:row})=>{
         if(!state.liveChat[row.channel])state.liveChat[row.channel]=[];
         if(!state.liveChat[row.channel].some(m=>m.id===row.id))state.liveChat[row.channel].push(row);
@@ -337,11 +339,40 @@
     if(!state.liveChat[channel].some(m=>m.id===data.id))state.liveChat[channel].push(data);
     if(state.activeChannel===channel)renderMessages();
   }
+  // Reconciliar estados duplicados de abas/sessoes, dando prioridade ao registro mais recente.
+  // Uma saida explicita vence um snapshot antigo de Presence ate uma nova sessao entrar.
+  function reconcilePresence(records, departures, now=Date.now()){
+    const latest=new Map();
+    for(const record of records){
+      if(!record||!record.id)continue;
+      const previous=latest.get(record.id);
+      const fresh=Date.parse(record.at||'')||0;
+      const old=Date.parse(previous?.at||'')||0;
+      if(!previous||fresh>=old)latest.set(record.id,{...record});
+    }
+    for(const [id,exit] of departures){
+      if(now-exit.when>120000)departures.delete(id);
+    }
+    for(const person of latest.values()){
+      const exit=departures.get(person.id);
+      if(!exit)continue;
+      // Uma nova sessao/novo canal cancela a supressao do estado antigo.
+      if(person.voiceRoom && (person.voiceRoom!==exit.room ||
+        (person.voiceSession&&person.voiceSession!==exit.session))){
+        departures.delete(person.id);
+      }else if(person.voiceRoom===exit.room &&
+        (!exit.session||person.voiceSession===exit.session)){
+        person.voiceRoom=null;person.isMuted=true;
+        person.isCameraOn=false;person.isStreaming=false;
+      }
+    }
+    return [...latest.values()];
+  }
   function refreshPresence(){
     if(!state.channel)return;
     const previous=state.presence;
-    state.presence=Object.values(state.channel.presenceState()).flat().filter(p=>p&&p.id);
-    const dedup=new Map();state.presence.forEach(p=>dedup.set(p.id,p));state.presence=[...dedup.values()];
+    const observed=Object.values(state.channel.presenceState()).flat();
+    state.presence=reconcilePresence(observed,state.voiceDepartures);
     if(state.voiceRoom){
       const oldIds=new Set(previous.filter(p=>p.id!==myId()&&p.voiceRoom===state.voiceRoom).map(p=>p.id));
       const newIds=new Set(state.presence.filter(p=>p.id!==myId()&&p.voiceRoom===state.voiceRoom).map(p=>p.id));
@@ -349,7 +380,28 @@
       else if([...oldIds].some(id=>!newIds.has(id)))voiceCue('leave');
     }
     renderChannels();renderMembers();renderVoiceStage();
-    const knownIds=new Set(state.members.map(m=>m.user_id));if(state.presence.some(p=>!knownIds.has(p.id)))fetchMembers();
+    const knownIds=new Set(state.members.map(m=>m.user_id));
+    if(state.presence.some(p=>!knownIds.has(p.id)))fetchMembers();
+  }
+  function handleVoicePresenceEvent(payload){
+    if(!payload||payload.kind!=='leave'||!payload.from||payload.from===myId()||!payload.room)return;
+    const record=state.presence.find(p=>p.id===payload.from);
+    if(record?.voiceSession&&payload.session&&record.voiceSession!==payload.session)return;
+    state.voiceDepartures.set(payload.from,{
+      room:payload.room,session:payload.session||null,when:Date.now()
+    });
+    const wasHere=record?.voiceRoom===payload.room;
+    state.presence=reconcilePresence(state.presence,state.voiceDepartures);
+    closePeer(payload.from);
+    renderChannels();renderMembers();renderVoiceStage();
+    if(wasHere&&state.voiceRoom===payload.room)voiceCue('leave');
+  }
+  function announceVoiceExit(room,session){
+    if(!state.channel||!state.live||!room)return Promise.resolve();
+    return Promise.resolve(state.channel.send({
+      type:'broadcast',event:'voice-presence',
+      payload:{kind:'leave',from:myId(),room,session}
+    })).catch(err=>console.warn('Saida da sala nao anunciada:',err));
   }
   async function updatePresence(){if(!state.channel||!state.user)return;try{await state.channel.track({id:myId(),nickname:state.user.nickname,color:state.user.color,voiceRoom:state.voiceRoom,isMuted:state.muted,isStreaming:!!state.screen,isCameraOn:!!state.camera,photo:safePhoto(state.profile.photo),voiceSession:state.voiceSession,at:new Date().toISOString()})}catch(e){console.warn('Presence',e)}}
 
@@ -389,6 +441,12 @@
     clearInterval(state.voiceWatchdog);
     state.voiceWatchdog=setInterval(()=>{
       if(!state.live||!state.voiceRoom)return;
+      // Atualiza o ultimo registro da sala para corrigir presenca em reconexoes lentas.
+      if(Date.now()-state.voicePresenceHeartbeat>12000){
+        state.voicePresenceHeartbeat=Date.now();
+        updatePresence();
+      }
+      refreshPresence();
       syncPeers();
       const now=Date.now();
       for(const peer of [...state.peers.values()]){
@@ -408,6 +466,8 @@
     // Criar/retomar o AudioContext no clique ajuda o Safari a reproduzir os sons e a voz.
     voiceCue('join');
     state.voiceRoom=room;state.voiceSession=newVoiceId();state.muted=true;
+    const joiningSession=state.voiceSession;
+    state.voicePresenceHeartbeat=Date.now();
     renderChannels();renderVoiceStage();closeMobile();
     if(!navigator.mediaDevices?.getUserMedia){
       debounceToast('Microfone e câmera exigem HTTPS ou localhost.',true);
@@ -422,26 +482,31 @@
       stream=new MediaStream();state.muted=true;
       debounceToast('Microfone indisponível. Você entrou apenas para ouvir.',true);
     }
-    if(state.voiceRoom!==room){stream.getTracks().forEach(t=>t.stop());return}
+    if(state.voiceRoom!==room||state.voiceSession!==joiningSession){stream.getTracks().forEach(t=>t.stop());return}
     state.microphone=stream;
     await updatePresence();
     renderChannels();renderVoiceStage();
-    if(state.live){await loadTurnServers();if(state.voiceRoom===room){syncPeers();beginVoiceWatch()}}
+    if(state.live){await loadTurnServers();if(state.voiceRoom===room&&state.voiceSession===joiningSession){syncPeers();beginVoiceWatch()}}
     else debounceToast('Prévia local: ninguém recebe sua voz na demo.');
   }
   async function leaveVoice(silent=false){
     if(!state.voiceRoom)return;
+    const oldRoom=state.voiceRoom,oldSession=state.voiceSession;
     if(silent!==true)voiceCue('leave');
     clearInterval(state.voiceWatchdog);state.voiceWatchdog=null;
-    // Publica saída antes de destruir a conexão, para que os outros vejam a mudança.
-    state.voiceRoom=null;state.voiceSession=null;
+    // Anuncia a saida antes do Presence se atualizar; protege contra snapshots atrasados.
+    const notice=announceVoiceExit(oldRoom,oldSession);
+    state.voiceRoom=null;state.voiceSession=null;state.voicePresenceHeartbeat=0;
     for(const id of [...state.peers.keys()])closePeer(id);
     state.earlyIce.clear();state.signalTasks.clear();
     const mic=state.microphone;state.microphone=null;
     if(mic)mic.getTracks().forEach(t=>t.stop());
+    renderChannels();renderVoiceStage();
     await stopScreen();await stopCamera();
     state.muted=false;
-    await updatePresence();renderChannels();renderVoiceStage();
+    await updatePresence();
+    await Promise.race([notice,new Promise(resolve=>setTimeout(resolve,350))]);
+    renderChannels();renderVoiceStage();
   }
   function closePeer(id){
     const peer=state.peers.get(id);
@@ -767,7 +832,26 @@
     $('#modalClose').onclick=closeModal;$('#modalOverlay').addEventListener('click',e=>{if(e.target.id==='modalOverlay'&&!$('#modalClose').classList.contains('hidden'))closeModal()});
     $('#mobileMenu').onclick=()=>toggleMobile('#sidebar');$('#memberToggle').onclick=()=>toggleMobile('#membersPanel');$('#closeMembers').onclick=closeMobile;$('#mobileScrim').onclick=closeMobile;
     window.addEventListener('keydown',e=>{if(e.key==='Escape'){closeMobile();$('#emojiPicker').classList.add('hidden');if(!$('#modalClose').classList.contains('hidden'))closeModal()}});
-    window.addEventListener('pagehide',()=>{state.microphone?.getTracks().forEach(t=>t.stop());state.screen?.getTracks().forEach(t=>t.stop());state.camera?.getTracks().forEach(t=>t.stop())});
+    window.addEventListener('pagehide',()=>{
+      // Em especial no iOS/Safari: avisar a sala mesmo se a pagina for fechada
+      // sem clicar em Sair. O envio e best effort; Presence corrige o restante.
+      if(state.voiceRoom){
+        announceVoiceExit(state.voiceRoom,state.voiceSession);
+        state.voiceRoom=null;state.voiceSession=null;
+        clearInterval(state.voiceWatchdog);state.voiceWatchdog=null;
+        for(const id of [...state.peers.keys()])closePeer(id);
+        updatePresence();
+      }
+      state.microphone?.getTracks().forEach(t=>t.stop());
+      state.screen?.getTracks().forEach(t=>t.stop());
+      state.camera?.getTracks().forEach(t=>t.stop());
+      state.microphone=null;state.screen=null;state.camera=null;
+    });
+    window.addEventListener('pageshow',event=>{
+      if(event.persisted&&state.live){
+        updatePresence();renderAll();
+      }
+    });
   }
   loadIcons();setupEvents();setupEntry();
 })();
