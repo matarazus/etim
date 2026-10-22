@@ -76,7 +76,7 @@
     live:false, sb:null,user:null, memberMap:new Map(), members:[], presence:[], channel:null, activeChannel:'geral',
     demoChat:safeJSON('etim_demo_chat',safeJSON('nexo_demo_chat',{})), profile:safeJSON('etim_demo_profile',safeJSON('nexo_demo_profile',{nickname:'Você',color:'#897df1',photo:''})),
     liveChat:{}, search:'', muted:false, voiceRoom:null, microphone:null, screen:null, camera:null, peers:new Map(), remoteVideos:new Map(), remoteCameras:new Map(),
-    noticeClosed:false, loading:false
+    noticeClosed:false, loading:false, audioPromptAt:0
   };
   const debounceToast = (s, error=false) => {const n=document.createElement('div');n.className='toast'+(error?' error':'');n.textContent=s;$('#toasts').appendChild(n);setTimeout(()=>n.remove(),4300)};
   const channelOf = id=>channels.find(x=>x.id===id)||channels[0];
@@ -341,7 +341,7 @@
     state.voiceRoom=null;state.muted=false;await updatePresence();renderChannels();renderVoiceStage();
   }
   function closePeer(id){
-    const peer=state.peers.get(id);if(peer){peer.pc.onicecandidate=null;peer.pc.ontrack=null;peer.pc.close();peer.audio?.remove();state.peers.delete(id)}
+    const peer=state.peers.get(id);if(peer){peer.pc.onicecandidate=null;peer.pc.ontrack=null;peer.pc.close();if(peer.audio){peer.audio.pause();peer.audio.srcObject=null;peer.audio.remove()}state.peers.delete(id)}
     state.remoteVideos.delete(id);state.remoteCameras.delete(id);
   }
   function syncPeers(){
@@ -367,7 +367,24 @@
     pc.ontrack=ev=>{
       const t=ev.track;
       if(t.kind==='audio'){
-        const a=document.createElement('audio');a.autoplay=true;a.playsInline=true;a.srcObject=new MediaStream([t]);document.body.appendChild(a);a.play().catch(()=>{});peer.audio=a;
+        // Safari e outros navegadores podem bloquear áudio remoto sem um clique do usuário.
+        // Mantemos um elemento por participante e mostramos um botão para liberar o som.
+        const a=peer.audio || document.createElement('audio');
+        if(!peer.audio){a.autoplay=true;a.playsInline=true;a.setAttribute('playsinline','');a.preload='auto';a.style.display='none';document.body.appendChild(a);peer.audio=a}
+        a.srcObject=ev.streams?.[0] || new MediaStream([t]);
+        a.muted=false;a.volume=1;
+        const playRemote=()=>{
+          const promise=a.play();
+          if(promise&&typeof promise.catch==='function')promise.catch(err=>{
+            console.warn('etim: reprodução de áudio remoto não iniciou:',err);
+            if(Date.now()-state.audioPromptAt>8000){
+              state.audioPromptAt=Date.now();
+              debounceToast('O navegador bloqueou o som. Clique em "Ativar som" na sala de voz.',true);
+            }
+          });
+        };
+        playRemote();
+        t.addEventListener('unmute',playRemote,{once:true});
       }else if(t.kind==='video'){
         const isScreen=ev.transceiver===screenTrans || (screenTrans.mid!==null && ev.transceiver.mid===screenTrans.mid);
         const info={stream:new MediaStream([t]),active:!t.muted};
@@ -376,7 +393,11 @@
         t.onmute=()=>{info.active=false;renderVoiceStage()};renderVoiceStage();
       }
     };
-    pc.onconnectionstatechange=()=>{if(pc.connectionState==='failed')debounceToast('Conexão de voz falhou com um participante. Algumas redes precisam de TURN.',true)};
+    pc.onconnectionstatechange=()=>{
+      console.info('etim WebRTC:',id,'conexão',pc.connectionState,'ICE',pc.iceConnectionState);
+      if(pc.connectionState==='failed')debounceToast('Conexão de voz falhou. Tente "Reconectar". Algumas redes precisam de TURN.',true);
+      if(pc.connectionState==='connected'&&peer.audio?.paused)peer.audio.play().catch(()=>{});
+    };
     if(initiator){const offer=await pc.createOffer();await pc.setLocalDescription(offer);await signal(id,{kind:'offer',description:pc.localDescription.toJSON()})}
     return peer;
   }
@@ -399,6 +420,21 @@
         if(peer.pc.remoteDescription)await peer.pc.addIceCandidate(p.candidate);else peer.queue.push(p.candidate);
       }
     }catch(e){console.error('WebRTC signal',e)}
+  }
+  async function activateRemoteAudio(){
+    if(!state.voiceRoom)return;
+    const audios=[...state.peers.values()].map(p=>p.audio).filter(Boolean);
+    if(!audios.length){debounceToast('Ainda não chegou áudio de outro participante. Confira se estão na mesma sala.',true);return}
+    const outcomes=await Promise.allSettled(audios.map(a=>{a.muted=false;a.volume=1;return a.play()}));
+    if(outcomes.some(x=>x.status==='rejected'))debounceToast('Não foi possível liberar todo o áudio. Confira a saída de som do navegador.',true);
+    else debounceToast('Áudio dos amigos ativado!');
+  }
+  async function reconnectVoice(){
+    if(!state.voiceRoom)return;
+    const room=state.voiceRoom;
+    debounceToast('Reconectando à sala de voz...');
+    await leaveVoice();
+    await joinVoice(room);
   }
   async function toggleMute(){
     if(!state.voiceRoom)return;
@@ -458,9 +494,11 @@
       remoteScreens.map(([id])=>`<div class="video-tile is-screen"><video autoplay playsinline id="remote-${esc(id)}"></video><span class="video-tile-label">Tela de ${esc(state.memberMap.get(id)?.nickname||'Amigo')}</span></div>`).join('');
     stage.innerHTML=`<div class="voice-stage-header"><div class="stage-icon">${icon('radio')}</div><div><h3>Você está na ${esc(voiceName(state.voiceRoom))}</h3><p>${state.live?'Áudio, câmera e tela em WebRTC · experimental':'Modo demonstração · prévia local de microfone, câmera e tela'}</p></div><span class="mode-pill ${state.live?'live':''}">${state.live?'AO VIVO':'DEMO'}</span></div>
       <div class="stage-participants">${participants.map(p=>`<div class="stage-person">${avatar(p.nickname,p.color,'voice-participant-avatar',ownPhoto(p.id))}<span class="voice-person-name">${esc(p.nickname||'Você')}${p.id===myId()?' (você)':''}</span><span class="voice-person-status" title="${p.isMuted?'Microfone silenciado':'Microfone ativo'}">${icon(p.isMuted?'mic-off':'mic')}</span>${p.isCameraOn?`<span title="Câmera ligada" class="voice-person-status">${icon('video')}</span>`:''}</div>`).join('')||'<span style="color:#9e98b9">Conectando...</span>'}</div>
-      <div class="stage-controls"><button id="muteVoice" class="${state.muted?'negative':''}">${icon(state.muted?'mic-off':'mic')}${state.muted?'Ativar mic':'Silenciar'}</button><button id="toggleCamera" class="${state.camera?'camera-on':''}">${icon(state.camera?'video-off':'video')}${state.camera?'Desligar câmera':'Ligar câmera'}</button><button id="shareScreen">${icon(state.screen?'monitor-off':'monitor-up')}${state.screen?'Parar transmissão':'Compartilhar tela'}</button><button class="danger" id="leaveVoice">${icon('phone-off')}Sair da sala</button></div>
+      <div class="stage-controls"><button id="muteVoice" class="${state.muted?'negative':''}">${icon(state.muted?'mic-off':'mic')}${state.muted?'Ativar mic':'Silenciar'}</button><button id="activateAudio">${icon('volume-2')}Ativar som</button><button id="reconnectVoice">${icon('radio')}Reconectar</button><button id="toggleCamera" class="${state.camera?'camera-on':''}">${icon(state.camera?'video-off':'video')}${state.camera?'Desligar câmera':'Ligar câmera'}</button><button id="shareScreen">${icon(state.screen?'monitor-off':'monitor-up')}${state.screen?'Parar transmissão':'Compartilhar tela'}</button><button class="danger" id="leaveVoice">${icon('phone-off')}Sair da sala</button></div>
       ${(cameraTiles||screenTiles)?`<div class="video-grid">${cameraTiles}${screenTiles}</div>`:''}`;
     $('#muteVoice').onclick=toggleMute;
+    $('#activateAudio').onclick=activateRemoteAudio;
+    $('#reconnectVoice').onclick=reconnectVoice;
     $('#toggleCamera').onclick=()=>state.camera?stopCamera():startCamera();
     $('#shareScreen').onclick=()=>state.screen?stopScreen():startScreen();
     $('#leaveVoice').onclick=leaveVoice;
