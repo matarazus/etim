@@ -76,8 +76,31 @@
     live:false, sb:null,user:null, memberMap:new Map(), members:[], presence:[], channel:null, activeChannel:'geral',
     demoChat:safeJSON('etim_demo_chat',safeJSON('nexo_demo_chat',{})), profile:safeJSON('etim_demo_profile',safeJSON('nexo_demo_profile',{nickname:'Você',color:'#897df1',photo:''})),
     liveChat:{}, search:'', muted:false, voiceRoom:null, microphone:null, screen:null, camera:null, peers:new Map(), remoteVideos:new Map(), remoteCameras:new Map(),
-    noticeClosed:false, loading:false, audioPromptAt:0
+    noticeClosed:false, loading:false, audioPromptAt:0,
+    voiceSession:null,voiceWatchdog:null,signalTasks:new Map(),earlyIce:new Map(),
+    voiceSounds:safeJSON('etim_voice_sounds',true)
   };
+  let voiceAudioContext=null;
+  function voiceCue(type){
+    if(!state.voiceSounds)return;
+    try{
+      const AudioCtx=window.AudioContext||window.webkitAudioContext;if(!AudioCtx)return;
+      if(!voiceAudioContext)voiceAudioContext=new AudioCtx();
+      if(voiceAudioContext.state==='suspended')voiceAudioContext.resume().catch(()=>{});
+      if(voiceAudioContext.state==='closed')return;
+      const ctx=voiceAudioContext,now=ctx.currentTime+.012;
+      const notes=type==='join'?[480,650]:[610,400];
+      notes.forEach((frequency,i)=>{
+        const oscillator=ctx.createOscillator(),gain=ctx.createGain();
+        oscillator.type='sine';oscillator.frequency.setValueAtTime(frequency,now+i*.075);
+        gain.gain.setValueAtTime(.0001,now+i*.075);
+        gain.gain.exponentialRampToValueAtTime(.045,now+i*.075+.014);
+        gain.gain.exponentialRampToValueAtTime(.0001,now+i*.075+.115);
+        oscillator.connect(gain);gain.connect(ctx.destination);
+        oscillator.start(now+i*.075);oscillator.stop(now+i*.075+.12);
+      });
+    }catch(err){console.warn('Aviso sonoro indisponível',err)}
+  }
   const debounceToast = (s, error=false) => {const n=document.createElement('div');n.className='toast'+(error?' error':'');n.textContent=s;$('#toasts').appendChild(n);setTimeout(()=>n.remove(),4300)};
   const channelOf = id=>channels.find(x=>x.id===id)||channels[0];
   const voiceName = id=>voiceChannels.find(v=>v.id===id)?.name||'Sala de voz';
@@ -282,7 +305,7 @@
     if(state.channel)await state.sb.removeChannel(state.channel);
     state.channel=state.sb.channel('etim:lobby',{config:{private:true,broadcast:{ack:true},presence:{key:uid}}});
     state.channel.on('presence',{event:'sync'},()=>{refreshPresence();syncPeers()})
-      .on('broadcast',{event:'signal'},({payload})=>handleSignal(payload))
+      .on('broadcast',{event:'signal'},({payload})=>queueSignal(payload))
       .on('postgres_changes',{event:'INSERT',schema:'public',table:'chat_messages'},({new:row})=>{
         if(!state.liveChat[row.channel])state.liveChat[row.channel]=[];
         if(!state.liveChat[row.channel].some(m=>m.id===row.id))state.liveChat[row.channel].push(row);
@@ -316,125 +339,315 @@
   }
   function refreshPresence(){
     if(!state.channel)return;
+    const previous=state.presence;
     state.presence=Object.values(state.channel.presenceState()).flat().filter(p=>p&&p.id);
     const dedup=new Map();state.presence.forEach(p=>dedup.set(p.id,p));state.presence=[...dedup.values()];
+    if(state.voiceRoom){
+      const oldIds=new Set(previous.filter(p=>p.id!==myId()&&p.voiceRoom===state.voiceRoom).map(p=>p.id));
+      const newIds=new Set(state.presence.filter(p=>p.id!==myId()&&p.voiceRoom===state.voiceRoom).map(p=>p.id));
+      if([...newIds].some(id=>!oldIds.has(id)))voiceCue('join');
+      else if([...oldIds].some(id=>!newIds.has(id)))voiceCue('leave');
+    }
     renderChannels();renderMembers();renderVoiceStage();
     const knownIds=new Set(state.members.map(m=>m.user_id));if(state.presence.some(p=>!knownIds.has(p.id)))fetchMembers();
   }
-  async function updatePresence(){if(!state.channel||!state.user)return;try{await state.channel.track({id:myId(),nickname:state.user.nickname,color:state.user.color,voiceRoom:state.voiceRoom,isMuted:state.muted,isStreaming:!!state.screen,isCameraOn:!!state.camera,photo:safePhoto(state.profile.photo),at:new Date().toISOString()})}catch(e){console.warn('Presence',e)}}
+  async function updatePresence(){if(!state.channel||!state.user)return;try{await state.channel.track({id:myId(),nickname:state.user.nickname,color:state.user.color,voiceRoom:state.voiceRoom,isMuted:state.muted,isStreaming:!!state.screen,isCameraOn:!!state.camera,photo:safePhoto(state.profile.photo),voiceSession:state.voiceSession,at:new Date().toISOString()})}catch(e){console.warn('Presence',e)}}
 
-  // WebRTC: malha P2P, adequada a pequenos grupos. STUN público; sem TURN próprio não cobre todas as redes.
+  // WebRTC P2P: quem tem ID menor inicia a oferta. ICE precoce é guardado até a descrição remota.
+  // Cada renegociação recebe um ID próprio; sinais antigos de tentativas anteriores são ignorados.
+  // TURN pode ser acrescentado posteriormente para redes que bloqueiam conexões diretas.
+  const iceServers=[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}];
+  const newVoiceId=()=>window.crypto?.randomUUID?.() || Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
+  function roomRemoteIds(){
+    return new Set(state.presence.filter(p=>p.id!==myId()&&p.voiceRoom===state.voiceRoom).map(p=>p.id));
+  }
+  function beginVoiceWatch(){
+    clearInterval(state.voiceWatchdog);
+    state.voiceWatchdog=setInterval(()=>{
+      if(!state.live||!state.voiceRoom)return;
+      syncPeers();
+      const now=Date.now();
+      for(const peer of [...state.peers.values()]){
+        if(peer.pc.connectionState==='connected')continue;
+        if(now-peer.lastAttempt<12000)continue;
+        if(peer.attempts>=4){
+          if(!peer.warned){peer.warned=true;debounceToast('Não consegui conectar a voz. Algumas redes exigem servidor TURN.',true)}
+          continue;
+        }
+        recoverPeer(peer.id,'tempo de espera');
+      }
+    },5000);
+  }
   async function joinVoice(room){
     if(state.voiceRoom===room){renderVoiceStage();closeMobile();return}
-    if(state.voiceRoom)await leaveVoice();
-    // Na demo, entrar na sala mostra o avatar imediatamente, antes de solicitar permissão de microfone.
-    state.voiceRoom=room;state.muted=true;renderChannels();renderVoiceStage();closeMobile();
-    if(!navigator.mediaDevices?.getUserMedia){debounceToast('Sala de demonstração. Microfone e tela requerem HTTPS ou localhost.',true);return}
-    try{state.microphone=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});state.muted=false}
-    catch(err){console.warn('Microfone negado:',err);state.microphone=new MediaStream();state.muted=true;debounceToast('Sem acesso ao microfone. Você entrou só para ouvir.',true)}
-    if(state.voiceRoom!==room){state.microphone?.getTracks().forEach(t=>t.stop());state.microphone=null;return}
-    await updatePresence();renderChannels();renderVoiceStage();if(state.live)syncPeers();else debounceToast('Prévia local: ninguém recebe sua voz na demo.');
+    if(state.voiceRoom)await leaveVoice(true);
+    // Criar/retomar o AudioContext no clique ajuda o Safari a reproduzir os sons e a voz.
+    voiceCue('join');
+    state.voiceRoom=room;state.voiceSession=newVoiceId();state.muted=true;
+    renderChannels();renderVoiceStage();closeMobile();
+    if(!navigator.mediaDevices?.getUserMedia){
+      debounceToast('Microfone e câmera exigem HTTPS ou localhost.',true);
+      await updatePresence();return;
+    }
+    let stream;
+    try{
+      stream=await navigator.mediaDevices.getUserMedia({audio:{echoCancellation:true,noiseSuppression:true,autoGainControl:true},video:false});
+      state.muted=false;
+    }catch(err){
+      console.warn('Microfone não autorizado',err);
+      stream=new MediaStream();state.muted=true;
+      debounceToast('Microfone indisponível. Você entrou apenas para ouvir.',true);
+    }
+    if(state.voiceRoom!==room){stream.getTracks().forEach(t=>t.stop());return}
+    state.microphone=stream;
+    await updatePresence();
+    renderChannels();renderVoiceStage();
+    if(state.live){syncPeers();beginVoiceWatch()}
+    else debounceToast('Prévia local: ninguém recebe sua voz na demo.');
   }
-  async function leaveVoice(){
-    await stopScreen();await stopCamera();state.microphone?.getTracks().forEach(t=>t.stop());state.microphone=null;
+  async function leaveVoice(silent=false){
+    if(!state.voiceRoom)return;
+    if(silent!==true)voiceCue('leave');
+    clearInterval(state.voiceWatchdog);state.voiceWatchdog=null;
+    // Publica saída antes de destruir a conexão, para que os outros vejam a mudança.
+    state.voiceRoom=null;state.voiceSession=null;
     for(const id of [...state.peers.keys()])closePeer(id);
-    state.voiceRoom=null;state.muted=false;await updatePresence();renderChannels();renderVoiceStage();
+    state.earlyIce.clear();state.signalTasks.clear();
+    const mic=state.microphone;state.microphone=null;
+    if(mic)mic.getTracks().forEach(t=>t.stop());
+    await stopScreen();await stopCamera();
+    state.muted=false;
+    await updatePresence();renderChannels();renderVoiceStage();
   }
   function closePeer(id){
-    const peer=state.peers.get(id);if(peer){peer.pc.onicecandidate=null;peer.pc.ontrack=null;peer.pc.close();if(peer.audio){peer.audio.pause();peer.audio.srcObject=null;peer.audio.remove()}state.peers.delete(id)}
+    const peer=state.peers.get(id);
+    if(peer){
+      peer.pc.onicecandidate=null;peer.pc.ontrack=null;
+      peer.pc.onconnectionstatechange=null;peer.pc.oniceconnectionstatechange=null;
+      if(peer.audio){peer.audio.pause();peer.audio.srcObject=null;peer.audio.remove()}
+      peer.pc.close();state.peers.delete(id);
+    }
     state.remoteVideos.delete(id);state.remoteCameras.delete(id);
   }
   function syncPeers(){
     if(!state.live||!state.voiceRoom||!state.microphone)return;
-    const active=state.presence.filter(p=>p.id!==myId()&&p.voiceRoom===state.voiceRoom);
-    for(const id of [...state.peers.keys()])if(!active.some(p=>p.id===id))closePeer(id);
-    for(const remote of active){if(!state.peers.has(remote.id))ensurePeer(remote.id,myId()<remote.id).catch(e=>console.warn('Peer:',e));}
+    const active=roomRemoteIds();
+    for(const id of [...state.peers.keys()])if(!active.has(id))closePeer(id);
+    for(const id of active){
+      const peer=ensurePeer(id);
+      if(myId()<id)offerPeer(peer).catch(e=>console.warn('Oferta WebRTC:',e));
+      else if(!peer.helloSent){
+        peer.helloSent=true;
+        signal(id,{kind:'hello'}).catch(e=>console.warn('Sinal hello:',e));
+      }
+    }
     renderVoiceStage();
   }
-  async function signal(to,data){if(!state.channel)return;try{await state.channel.send({type:'broadcast',event:'signal',payload:{...data,to,from:myId(),room:state.voiceRoom}})}catch(e){console.warn('Sinalização',e)}}
-  async function ensurePeer(id,initiator=false){
+  async function signal(to,data){
+    if(!state.channel||!state.voiceRoom)return;
+    const target=state.presence.find(p=>p.id===to);
+    const payload={...data,to,from:myId(),room:state.voiceRoom,
+      session:state.voiceSession,toSession:target?.voiceSession||null};
+    const result=await state.channel.send({type:'broadcast',event:'signal',payload});
+    if(result==='error'||result==='timed out')console.warn('etim: sinal WebRTC não entregue:',result,data.kind);
+  }
+  function ensurePeer(id){
     if(state.peers.has(id))return state.peers.get(id);
-    if(!state.voiceRoom)return null;
-    const pc=new RTCPeerConnection({iceServers:[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}]});
+    const pc=new RTCPeerConnection({iceServers});
     const audioTrans=pc.addTransceiver('audio',{direction:'sendrecv'});
     const cameraTrans=pc.addTransceiver('video',{direction:'sendrecv'});
     const screenTrans=pc.addTransceiver('video',{direction:'sendrecv'});
-    const peer={id,pc,audioSender:audioTrans.sender,cameraSender:cameraTrans.sender,screenSender:screenTrans.sender,screenTrans,queue:[],audio:null};state.peers.set(id,peer);
-    const track=state.microphone?.getAudioTracks()[0];if(track)await peer.audioSender.replaceTrack(track);
-    const cameraTrack=state.camera?.getVideoTracks()[0];if(cameraTrack)await peer.cameraSender.replaceTrack(cameraTrack);
-    const screenTrack=state.screen?.getVideoTracks()[0];if(screenTrack)await peer.screenSender.replaceTrack(screenTrack);
-    pc.onicecandidate=ev=>{if(ev.candidate)signal(id,{kind:'ice',candidate:ev.candidate.toJSON()})};
+    const peer={
+      id,pc,audioSender:audioTrans.sender,cameraSender:cameraTrans.sender,
+      screenSender:screenTrans.sender,screenTrans,
+      audio:null,callId:null,offering:false,offerSent:false,helloSent:false,
+      lastAttempt:Date.now(),attempts:0,warned:false,responded:false,ready:null
+    };
+    state.peers.set(id,peer); // Registra antes do primeiro await: impede conexões duplicadas.
+    peer.ready=Promise.all([
+      peer.audioSender.replaceTrack(state.microphone?.getAudioTracks()[0]||null),
+      peer.cameraSender.replaceTrack(state.camera?.getVideoTracks()[0]||null),
+      peer.screenSender.replaceTrack(state.screen?.getVideoTracks()[0]||null)
+    ]);
+    pc.onicecandidate=ev=>{
+      if(ev.candidate&&peer.callId&&state.peers.get(id)===peer)
+        signal(id,{kind:'ice',connectionId:peer.callId,candidate:ev.candidate.toJSON()}).catch(console.warn);
+    };
     pc.ontrack=ev=>{
-      const t=ev.track;
-      if(t.kind==='audio'){
-        // Safari e outros navegadores podem bloquear áudio remoto sem um clique do usuário.
-        // Mantemos um elemento por participante e mostramos um botão para liberar o som.
-        const a=peer.audio || document.createElement('audio');
-        if(!peer.audio){a.autoplay=true;a.playsInline=true;a.setAttribute('playsinline','');a.preload='auto';a.style.display='none';document.body.appendChild(a);peer.audio=a}
-        a.srcObject=ev.streams?.[0] || new MediaStream([t]);
-        a.muted=false;a.volume=1;
-        const playRemote=()=>{
-          const promise=a.play();
-          if(promise&&typeof promise.catch==='function')promise.catch(err=>{
-            console.warn('etim: reprodução de áudio remoto não iniciou:',err);
+      if(state.peers.get(id)!==peer)return;
+      const track=ev.track;
+      if(track.kind==='audio'){
+        const audio=peer.audio||document.createElement('audio');
+        if(!peer.audio){
+          audio.autoplay=true;audio.playsInline=true;audio.setAttribute('playsinline','');
+          audio.style.display='none';audio.preload='auto';document.body.appendChild(audio);peer.audio=audio;
+        }
+        audio.srcObject=new MediaStream([track]);audio.muted=false;audio.volume=1;
+        function playIncoming(){
+          if(state.peers.get(id)!==peer)return;
+          audio.play().catch(err=>{
+            console.warn('etim: áudio remoto bloqueado',err);
             if(Date.now()-state.audioPromptAt>8000){
               state.audioPromptAt=Date.now();
-              debounceToast('O navegador bloqueou o som. Clique em "Ativar som" na sala de voz.',true);
+              debounceToast('Clique em "Ativar som" para liberar o áudio dos amigos.',true);
             }
           });
-        };
-        playRemote();
-        t.addEventListener('unmute',playRemote,{once:true});
-      }else if(t.kind==='video'){
-        const isScreen=ev.transceiver===screenTrans || (screenTrans.mid!==null && ev.transceiver.mid===screenTrans.mid);
-        const info={stream:new MediaStream([t]),active:!t.muted};
+        }
+        playIncoming();
+        track.addEventListener('unmute',playIncoming);
+      }else if(track.kind==='video'){
+        const isScreen=ev.transceiver===screenTrans ||
+          (screenTrans.mid!==null&&ev.transceiver.mid===screenTrans.mid);
+        const info={stream:new MediaStream([track]),active:!track.muted};
         (isScreen?state.remoteVideos:state.remoteCameras).set(id,info);
-        t.onunmute=()=>{info.active=true;renderVoiceStage()};
-        t.onmute=()=>{info.active=false;renderVoiceStage()};renderVoiceStage();
+        track.onunmute=()=>{info.active=true;renderVoiceStage()};
+        track.onmute=()=>{info.active=false;renderVoiceStage()};
+        renderVoiceStage();
       }
     };
     pc.onconnectionstatechange=()=>{
-      console.info('etim WebRTC:',id,'conexão',pc.connectionState,'ICE',pc.iceConnectionState);
-      if(pc.connectionState==='failed')debounceToast('Conexão de voz falhou. Tente "Reconectar". Algumas redes precisam de TURN.',true);
-      if(pc.connectionState==='connected'&&peer.audio?.paused)peer.audio.play().catch(()=>{});
+      if(state.peers.get(id)!==peer)return;
+      console.info('etim WebRTC',id,pc.connectionState,pc.iceConnectionState);
+      if(pc.connectionState==='connected'){
+        peer.attempts=0;
+        if(peer.audio?.paused)peer.audio.play().catch(()=>{});
+      }else if(pc.connectionState==='failed'){
+        debounceToast('Conexão de voz falhou. Tentando reconectar...',true);
+        recoverPeer(id,'conexão falhou');
+      }
     };
-    if(initiator){const offer=await pc.createOffer();await pc.setLocalDescription(offer);await signal(id,{kind:'offer',description:pc.localDescription.toJSON()})}
+    pc.oniceconnectionstatechange=()=>{
+      if(state.peers.get(id)!==peer)return;
+      if(pc.iceConnectionState==='failed')recoverPeer(id,'ICE falhou');
+    };
     return peer;
   }
-  async function handleSignal(p){
-    if(!p||p.to!==myId()||p.from===myId()||!state.voiceRoom||p.room!==state.voiceRoom)return;
+  async function offerPeer(peer){
+    if(!peer||state.peers.get(peer.id)!==peer||myId()>=peer.id)return;
+    if(peer.offering||peer.offerSent||peer.pc.signalingState!=='stable')return;
+    peer.offering=true;
     try{
-      if(p.kind==='offer'){
-        const peer=await ensurePeer(p.from,false);if(!peer)return;
-        await peer.pc.setRemoteDescription(p.description);
-        const answer=await peer.pc.createAnswer();await peer.pc.setLocalDescription(answer);
-        await signal(p.from,{kind:'answer',description:peer.pc.localDescription.toJSON()});
-        for(const c of peer.queue.splice(0))await peer.pc.addIceCandidate(c);
-      }else if(p.kind==='answer'){
-        const peer=state.peers.get(p.from);if(!peer)return;
-        if(peer.pc.signalingState!=='have-local-offer')return;
-        await peer.pc.setRemoteDescription(p.description);
-        for(const c of peer.queue.splice(0))await peer.pc.addIceCandidate(c);
-      }else if(p.kind==='ice'){
-        const peer=await ensurePeer(p.from,false);if(!peer)return;
-        if(peer.pc.remoteDescription)await peer.pc.addIceCandidate(p.candidate);else peer.queue.push(p.candidate);
+      await peer.ready;
+      if(state.peers.get(peer.id)!==peer||!state.voiceRoom)return;
+      peer.callId=newVoiceId();
+      peer.lastAttempt=Date.now();peer.attempts++;
+      const offer=await peer.pc.createOffer();
+      await peer.pc.setLocalDescription(offer);
+      peer.offerSent=true;
+      await signal(peer.id,{kind:'offer',connectionId:peer.callId,description:peer.pc.localDescription.toJSON()});
+    }catch(err){
+      peer.offerSent=false;
+      console.warn('Erro ao fazer oferta:',err);
+    }finally{peer.offering=false}
+  }
+  function addEarlyIce(from,connectionId,candidate){
+    if(!connectionId)return;
+    const key=from+':'+connectionId;
+    const list=state.earlyIce.get(key)||[];
+    if(list.length<64)list.push(candidate);
+    state.earlyIce.set(key,list);
+    // Evita crescimento infinito se um participante cair antes da oferta.
+    if(state.earlyIce.size>40)state.earlyIce.delete(state.earlyIce.keys().next().value);
+  }
+  async function flushEarlyIce(peer){
+    if(!peer.callId||!peer.pc.remoteDescription)return;
+    const key=peer.id+':'+peer.callId;
+    const list=state.earlyIce.get(key)||[];
+    state.earlyIce.delete(key);
+    for(const candidate of list){
+      try{await peer.pc.addIceCandidate(candidate)}
+      catch(err){console.warn('ICE pendente ignorado:',err)}
+    }
+  }
+  function queueSignal(p){
+    if(!p||p.to!==myId()||p.from===myId()||!state.voiceRoom||p.room!==state.voiceRoom)return;
+    if(p.toSession&&p.toSession!==state.voiceSession)return;
+    const previous=state.signalTasks.get(p.from)||Promise.resolve();
+    const task=previous.catch(()=>{}).then(()=>handleSignal(p)).catch(err=>console.warn('etim WebRTC sinal:',err));
+    state.signalTasks.set(p.from,task);
+    task.finally(()=>{if(state.signalTasks.get(p.from)===task)state.signalTasks.delete(p.from)});
+  }
+  async function handleSignal(p){
+    if(!state.live||!state.voiceRoom||!state.microphone)return;
+    if(p.kind==='hello'){
+      if(myId()>=p.from)return; // Só o lado eleito como iniciador oferece.
+      let peer=ensurePeer(p.from);
+      if(p.reset&&Date.now()-peer.lastAttempt>3500){
+        closePeer(p.from);peer=ensurePeer(p.from);
       }
-    }catch(e){console.error('WebRTC signal',e)}
+      await offerPeer(peer);
+      return;
+    }
+    if(p.kind==='ice'){
+      const peer=state.peers.get(p.from);
+      if(peer&&peer.callId===p.connectionId&&peer.pc.remoteDescription){
+        try{await peer.pc.addIceCandidate(p.candidate)}
+        catch(err){console.warn('ICE candidato recusado:',err)}
+      }else if(!peer||!peer.callId||peer.callId===p.connectionId){
+        addEarlyIce(p.from,p.connectionId,p.candidate);
+      }
+      return;
+    }
+    if(p.kind==='offer'){
+      if(myId()<p.from){console.warn('Oferta fora da ordem esperada, ignorada');return}
+      let peer=state.peers.get(p.from);
+      if(peer&&peer.callId!==p.connectionId){closePeer(p.from);peer=null}
+      if(!peer)peer=ensurePeer(p.from);
+      if(peer.responded&&peer.callId===p.connectionId)return;
+      peer.callId=p.connectionId;
+      peer.lastAttempt=Date.now();
+      await peer.ready;
+      await peer.pc.setRemoteDescription(p.description);
+      await flushEarlyIce(peer);
+      const answer=await peer.pc.createAnswer();
+      await peer.pc.setLocalDescription(answer);
+      peer.responded=true;
+      await signal(p.from,{kind:'answer',connectionId:peer.callId,description:peer.pc.localDescription.toJSON()});
+      return;
+    }
+    if(p.kind==='answer'){
+      const peer=state.peers.get(p.from);
+      if(!peer||peer.callId!==p.connectionId||peer.pc.signalingState!=='have-local-offer')return;
+      await peer.pc.setRemoteDescription(p.description);
+      await flushEarlyIce(peer);
+    }
+  }
+  function recoverPeer(id,reason){
+    if(!state.live||!state.voiceRoom||!roomRemoteIds().has(id))return;
+    const peer=state.peers.get(id);
+    if(peer&&Date.now()-peer.lastAttempt<4500)return;
+    console.info('etim recuperando conexão:',id,reason);
+    if(myId()<id){
+      const attempts=peer?.attempts||0;
+      if(attempts>=4)return;
+      closePeer(id);
+      const next=ensurePeer(id);next.attempts=attempts;
+      offerPeer(next).catch(console.warn);
+    }else{
+      if(peer)peer.lastAttempt=Date.now();
+      signal(id,{kind:'hello',reset:true}).catch(console.warn);
+    }
   }
   async function activateRemoteAudio(){
     if(!state.voiceRoom)return;
+    // O clique desbloqueia reprodução no Safari e reativa o contexto de avisos.
+    if(voiceAudioContext?.state==='suspended')voiceAudioContext.resume().catch(()=>{});
     const audios=[...state.peers.values()].map(p=>p.audio).filter(Boolean);
-    if(!audios.length){debounceToast('Ainda não chegou áudio de outro participante. Confira se estão na mesma sala.',true);return}
-    const outcomes=await Promise.allSettled(audios.map(a=>{a.muted=false;a.volume=1;return a.play()}));
-    if(outcomes.some(x=>x.status==='rejected'))debounceToast('Não foi possível liberar todo o áudio. Confira a saída de som do navegador.',true);
-    else debounceToast('Áudio dos amigos ativado!');
+    if(!audios.length){debounceToast('Ainda não chegou áudio dos amigos. Tente "Reconectar".',true);return}
+    const results=await Promise.allSettled(audios.map(a=>{a.muted=false;a.volume=1;return a.play()}));
+    if(results.some(r=>r.status==='rejected'))debounceToast('Confira as permissões de áudio e a saída de som.',true);
+    else debounceToast('Som dos amigos ativado!');
   }
   async function reconnectVoice(){
     if(!state.voiceRoom)return;
-    const room=state.voiceRoom;
-    debounceToast('Reconectando à sala de voz...');
-    await leaveVoice();
-    await joinVoice(room);
+    const room=state.voiceRoom;debounceToast('Reconectando sua chamada...');
+    await leaveVoice(true);await joinVoice(room);
+  }
+  function toggleVoiceSounds(){
+    state.voiceSounds=!state.voiceSounds;
+    safeStore('etim_voice_sounds',state.voiceSounds);
+    if(state.voiceSounds)voiceCue('join');
+    renderVoiceStage();
   }
   async function toggleMute(){
     if(!state.voiceRoom)return;
@@ -494,11 +707,12 @@
       remoteScreens.map(([id])=>`<div class="video-tile is-screen"><video autoplay playsinline id="remote-${esc(id)}"></video><span class="video-tile-label">Tela de ${esc(state.memberMap.get(id)?.nickname||'Amigo')}</span></div>`).join('');
     stage.innerHTML=`<div class="voice-stage-header"><div class="stage-icon">${icon('radio')}</div><div><h3>Você está na ${esc(voiceName(state.voiceRoom))}</h3><p>${state.live?'Áudio, câmera e tela em WebRTC · experimental':'Modo demonstração · prévia local de microfone, câmera e tela'}</p></div><span class="mode-pill ${state.live?'live':''}">${state.live?'AO VIVO':'DEMO'}</span></div>
       <div class="stage-participants">${participants.map(p=>`<div class="stage-person">${avatar(p.nickname,p.color,'voice-participant-avatar',ownPhoto(p.id))}<span class="voice-person-name">${esc(p.nickname||'Você')}${p.id===myId()?' (você)':''}</span><span class="voice-person-status" title="${p.isMuted?'Microfone silenciado':'Microfone ativo'}">${icon(p.isMuted?'mic-off':'mic')}</span>${p.isCameraOn?`<span title="Câmera ligada" class="voice-person-status">${icon('video')}</span>`:''}</div>`).join('')||'<span style="color:#9e98b9">Conectando...</span>'}</div>
-      <div class="stage-controls"><button id="muteVoice" class="${state.muted?'negative':''}">${icon(state.muted?'mic-off':'mic')}${state.muted?'Ativar mic':'Silenciar'}</button><button id="activateAudio">${icon('volume-2')}Ativar som</button><button id="reconnectVoice">${icon('radio')}Reconectar</button><button id="toggleCamera" class="${state.camera?'camera-on':''}">${icon(state.camera?'video-off':'video')}${state.camera?'Desligar câmera':'Ligar câmera'}</button><button id="shareScreen">${icon(state.screen?'monitor-off':'monitor-up')}${state.screen?'Parar transmissão':'Compartilhar tela'}</button><button class="danger" id="leaveVoice">${icon('phone-off')}Sair da sala</button></div>
+      <div class="stage-controls"><button id="muteVoice" class="${state.muted?'negative':''}">${icon(state.muted?'mic-off':'mic')}${state.muted?'Ativar mic':'Silenciar'}</button><button id="activateAudio">${icon('volume-2')}Ativar som</button><button id="reconnectVoice">${icon('radio')}Reconectar</button><button id="voiceSounds">${icon('volume-2')}Sons ${state.voiceSounds?'ligados':'desligados'}</button><button id="toggleCamera" class="${state.camera?'camera-on':''}">${icon(state.camera?'video-off':'video')}${state.camera?'Desligar câmera':'Ligar câmera'}</button><button id="shareScreen">${icon(state.screen?'monitor-off':'monitor-up')}${state.screen?'Parar transmissão':'Compartilhar tela'}</button><button class="danger" id="leaveVoice">${icon('phone-off')}Sair da sala</button></div>
       ${(cameraTiles||screenTiles)?`<div class="video-grid">${cameraTiles}${screenTiles}</div>`:''}`;
     $('#muteVoice').onclick=toggleMute;
     $('#activateAudio').onclick=activateRemoteAudio;
     $('#reconnectVoice').onclick=reconnectVoice;
+    $('#voiceSounds').onclick=toggleVoiceSounds;
     $('#toggleCamera').onclick=()=>state.camera?stopCamera():startCamera();
     $('#shareScreen').onclick=()=>state.screen?stopScreen():startScreen();
     $('#leaveVoice').onclick=leaveVoice;
