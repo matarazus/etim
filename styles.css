@@ -57,3 +57,23 @@
 
 /* Estado de recebimento de vídeo do etim: diagnóstico discreto sobre o player */
 .video-health{position:absolute;z-index:2;top:10px;left:10px;right:10px;padding:8px 10px;border:1px solid #555174;border-radius:9px;color:#dfd9f8;background:#211f2bda;font-size:12px;text-align:center;pointer-events:none}.video-health.hidden{display:none!important}
+
+/* etim · chamada separada do chat */
+.main-area{min-height:0}
+.media-view{display:flex;flex-direction:column;min-height:0;flex:1;overflow:hidden;padding:14px 22px 18px;gap:12px}
+.media-view.hidden,.chat-voice-banner.hidden{display:none!important}
+.media-view-top{display:flex;align-items:center;gap:16px;min-height:47px;flex-shrink:0}
+.media-back{border:1px solid #565071;border-radius:10px;background:#302d43;color:#f2efff;padding:10px 13px;font-weight:700}
+.media-view-title{display:flex;flex-direction:column;gap:2px;min-width:0}.media-view-title strong{font-size:16px}.media-view-title small{font-size:11px;color:#a5a1b8}
+.media-view .voice-stage{display:flex;flex-direction:column;gap:6px;flex:1;max-height:none!important;min-height:0;overflow-y:auto;margin:0}
+.media-view .voice-stage.hidden{display:none!important}
+.media-view .video-grid{grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));align-content:start}
+.media-view .video-tile{min-height:190px}
+.media-view .video-tile video{max-height:65dvh}
+.chat-voice-banner{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 18px;background:#242336;border-bottom:1px solid #3d3954;font-size:12px}
+.chat-voice-banner button,.watch-media{border:1px solid #655c83;border-radius:7px;background:#39304e;color:#dbcbff;padding:5px 8px;font-size:11px;cursor:pointer;white-space:nowrap}
+.voice-person .watch-media{margin-left:auto}
+.voice-person.is-speaking .avatar,.stage-person.is-speaking .avatar,.self-avatar.is-speaking{box-shadow:0 0 0 2px #6de7b5,0 0 0 5px #6de7b53b!important;animation:etim-talk 0.9s ease-in-out infinite alternate}
+@keyframes etim-talk{from{box-shadow:0 0 0 2px #6de7b5,0 0 0 4px #6de7b52a}to{box-shadow:0 0 0 3px #6de7b5,0 0 0 7px #6de7b54c}}
+@media(max-width:690px){.media-view{padding:12px;gap:8px}.media-view-top{align-items:flex-start;flex-wrap:wrap}.media-view .video-grid{grid-template-columns:1fr}.media-view .video-tile{min-height:165px}.chat-voice-banner{padding:9px 12px}.voice-person .watch-media{font-size:10px;padding:4px 6px}}
+@media(prefers-reduced-motion:reduce){.voice-person.is-speaking .avatar,.stage-person.is-speaking .avatar,.self-avatar.is-speaking{animation:none}}
