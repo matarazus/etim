@@ -356,7 +356,31 @@
   // WebRTC P2P: quem tem ID menor inicia a oferta. ICE precoce é guardado até a descrição remota.
   // Cada renegociação recebe um ID próprio; sinais antigos de tentativas anteriores são ignorados.
   // TURN pode ser acrescentado posteriormente para redes que bloqueiam conexões diretas.
-  const iceServers=[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}];
+  const stunServers=[{urls:'stun:stun.l.google.com:19302'},{urls:'stun:stun1.l.google.com:19302'}];
+  let turnServers=[],turnExpiresAt=0,turnLoading=null;
+  async function loadTurnServers(){
+    if(!state.live||!state.sb)return stunServers;
+    if(turnServers.length&&Date.now()<turnExpiresAt)return [...stunServers,...turnServers];
+    if(turnLoading)return turnLoading;
+    turnLoading=(async()=>{
+      try{
+        const {data,error}=await state.sb.functions.invoke('etim-turn',{body:{}});
+        if(error)throw error;
+        if(!Array.isArray(data?.iceServers)||!data.iceServers.length)throw new Error('Lista TURN vazia');
+        const servers=data.iceServers.filter(s=>s&&s.urls&&typeof s.credential==='string'&&typeof s.username==='string');
+        if(!servers.length)throw new Error('Credenciais TURN invalidas');
+        turnServers=servers;
+        turnExpiresAt=Date.now()+Math.min(Number(data.ttl)||3600,3600)*1000;
+        console.info('etim: TURN disponivel');
+      }catch(err){
+        console.warn('etim TURN indisponivel, usando STUN:',err);
+        turnServers=[];turnExpiresAt=0;
+        debounceToast('TURN ainda nao esta ativo; usando conexao direta STUN.',true);
+      }finally{turnLoading=null}
+      return [...stunServers,...turnServers];
+    })();
+    return turnLoading;
+  }
   const newVoiceId=()=>window.crypto?.randomUUID?.() || Date.now().toString(36)+'-'+Math.random().toString(36).slice(2);
   function roomRemoteIds(){
     return new Set(state.presence.filter(p=>p.id!==myId()&&p.voiceRoom===state.voiceRoom).map(p=>p.id));
@@ -402,7 +426,7 @@
     state.microphone=stream;
     await updatePresence();
     renderChannels();renderVoiceStage();
-    if(state.live){syncPeers();beginVoiceWatch()}
+    if(state.live){await loadTurnServers();if(state.voiceRoom===room){syncPeers();beginVoiceWatch()}}
     else debounceToast('Prévia local: ninguém recebe sua voz na demo.');
   }
   async function leaveVoice(silent=false){
@@ -453,7 +477,7 @@
   }
   function ensurePeer(id){
     if(state.peers.has(id))return state.peers.get(id);
-    const pc=new RTCPeerConnection({iceServers});
+    const pc=new RTCPeerConnection({iceServers:[...stunServers,...turnServers]});
     const audioTrans=pc.addTransceiver('audio',{direction:'sendrecv'});
     const cameraTrans=pc.addTransceiver('video',{direction:'sendrecv'});
     const screenTrans=pc.addTransceiver('video',{direction:'sendrecv'});
