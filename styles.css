@@ -54,3 +54,6 @@
 
 /* etim: botao para liberar reprodução remota de video no Safari/iOS */
 .video-retry{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:3;border:1px solid #8f86c5;border-radius:12px;background:#28253edc;color:#fff;padding:11px 15px;font-weight:700;white-space:nowrap;max-width:90%}.video-retry.hidden{display:none!important}.video-tile{isolation:isolate}
+
+/* Estado de recebimento de vídeo do etim: diagnóstico discreto sobre o player */
+.video-health{position:absolute;z-index:2;top:10px;left:10px;right:10px;padding:8px 10px;border:1px solid #555174;border-radius:9px;color:#dfd9f8;background:#211f2bda;font-size:12px;text-align:center;pointer-events:none}.video-health.hidden{display:none!important}
