@@ -1270,7 +1270,7 @@
     document.addEventListener('visibilitychange',()=>{
       if(!document.hidden&&state.voiceRoom){
         renderVoiceStage();
-        for(const video of $('#voiceStage video')){
+        for(const video of document.querySelectorAll('#voiceStage video')){
           if(video.srcObject&&video.paused)video.play().catch(()=>{});
         }
       }
