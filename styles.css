@@ -77,3 +77,6 @@
 @keyframes etim-talk{from{box-shadow:0 0 0 2px #6de7b5,0 0 0 4px #6de7b52a}to{box-shadow:0 0 0 3px #6de7b5,0 0 0 7px #6de7b54c}}
 @media(max-width:690px){.media-view{padding:12px;gap:8px}.media-view-top{align-items:flex-start;flex-wrap:wrap}.media-view .video-grid{grid-template-columns:1fr}.media-view .video-tile{min-height:165px}.chat-voice-banner{padding:9px 12px}.voice-person .watch-media{font-size:10px;padding:4px 6px}}
 @media(prefers-reduced-motion:reduce){.voice-person.is-speaking .avatar,.stage-person.is-speaking .avatar,.self-avatar.is-speaking{animation:none}}
+
+/* Painel de diagnóstico WebRTC. Não exibe tokens, IPs ou identificadores de conta. */
+.voice-report{max-height:46vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;text-align:left;background:#171821;border:1px solid #44415c;border-radius:10px;padding:12px;font-size:11px;line-height:1.65;color:#e5e4f2;margin:12px 0}
