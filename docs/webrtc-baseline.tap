@@ -20,9 +20,9 @@ not ok 3 - answerer binds exactly three sendrecv transceivers
   failureType: 'testCodeFailure'
   error: |-
     b: extra orphan transceivers
-    
+
     6 !== 3
-    
+
   code: 'ERR_ASSERTION'
   name: 'AssertionError'
   expected: 3
@@ -72,9 +72,9 @@ not ok 9 - screen permission resolving after leave must stop capture
   failureType: 'testCodeFailure'
   error: |-
     capture must not survive leaving
-    
+
     'live' !== 'ended'
-    
+
   code: 'ERR_ASSERTION'
   name: 'AssertionError'
   expected: 'ended'
@@ -94,9 +94,9 @@ not ok 10 - camera permission from old room must not publish in new room
   failureType: 'testCodeFailure'
   error: |-
     old request must be cancelled
-    
+
     'live' !== 'ended'
-    
+
   code: 'ERR_ASSERTION'
   name: 'AssertionError'
   expected: 'ended'
@@ -116,9 +116,9 @@ not ok 11 - queued signal must be revalidated after room session changes
   failureType: 'testCodeFailure'
   error: |-
     old queued offer must not create a peer in a new session
-    
+
     true !== false
-    
+
   code: 'ERR_ASSERTION'
   name: 'AssertionError'
   expected: false
@@ -138,9 +138,9 @@ not ok 12 - presence must not create peer connections before TURN resolves
   failureType: 'testCodeFailure'
   error: |-
     presence sync created a STUN-only PC while TURN loading
-    
+
     1 !== 0
-    
+
   code: 'ERR_ASSERTION'
   name: 'AssertionError'
   expected: 0
@@ -167,11 +167,11 @@ not ok 14 - SDP must be bidirectional regardless of join order a-b
   error: |-
     offerer audio became sendonly
     + actual - expected
-    
+
     + 'sendonly'
     - 'sendrecv'
            ^
-    
+
   code: 'ERR_ASSERTION'
   name: 'AssertionError'
   expected: 'sendrecv'
@@ -192,11 +192,11 @@ not ok 15 - SDP must be bidirectional regardless of join order b-a
   error: |-
     offerer audio became sendonly
     + actual - expected
-    
+
     + 'sendonly'
     - 'sendrecv'
            ^
-    
+
   code: 'ERR_ASSERTION'
   name: 'AssertionError'
   expected: 'sendrecv'
@@ -216,9 +216,9 @@ not ok 16 - ontrack must retain both offered video MIDs before media begins
   failureType: 'testCodeFailure'
   error: |-
     offered screen receiver not classified as screen
-    
+
     0 !== 1
-    
+
   code: 'ERR_ASSERTION'
   name: 'AssertionError'
   expected: 1
@@ -282,9 +282,9 @@ not ok 20 - muting while microphone repair awaits permission must keep new track
   failureType: 'testCodeFailure'
   error: |-
     UI says muted but replacement microphone is enabled
-    
+
     true !== false
-    
+
   code: 'ERR_ASSERTION'
   name: 'AssertionError'
   expected: false

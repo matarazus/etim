@@ -134,13 +134,19 @@ test('presence must not create peer connections before TURN resolves',{timeout:2
 test('lost renegotiation answer must not permanently wedge connected peer',{timeout:30000},async t=>{
   const lab=await createLab(t);if(!await lab.requireTransport())return;
   await lab.join('a');await lab.join('b');await lab.connected();
-  lab.drop(message=>message.payload.kind==='answer');
+  let dropped=0;
+  lab.drop(message=>{if(message.payload.kind==='answer'){dropped++;return true}return false});
   await lab.pages.get('a').evaluate(()=>audit.startCamera());
   await lab.pages.get('a').waitForFunction(()=>[...audit.state.peers.values()][0].pc.signalingState==='have-local-offer');
+  await poll(async()=>dropped,count=>count>0);
+  assert.ok(dropped>0,'the experiment must actually drop a renegotiation answer');
+  const callId=(await lab.snapshot('a')).peers[0].callId;
   lab.drop(()=>false);
-  // The production watchdog runs every five seconds. Wait beyond its 12s retry threshold.
-  await lab.pages.get('a').waitForTimeout(15500);
-  assert.equal((await lab.snapshot('a')).peers[0].signaling,'stable','connected ICE is not proof of completed signaling');
+  await lab.negotiated();
+  const after=(await lab.snapshot('a')).peers[0];
+  assert.equal(after.signaling,'stable','connected ICE is not proof of completed signaling');
+  assert.equal(after.callId,callId,'answer retry must preserve the connected peer');
+  assert.equal(after.connection,'connected');
 });
 
 for(const order of [['a','b'],['b','a']])test(`SDP must be bidirectional regardless of join order ${order.join('-')}`,{timeout:20000},async t=>{
