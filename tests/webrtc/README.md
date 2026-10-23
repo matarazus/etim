@@ -4,6 +4,8 @@ Estes testes descrevem contratos de funcionamento correto. **A versão auditada 
 
 A branch de correção agora passa em 29 dos 35 testes localmente, com seis testes RTP bloqueados pelo ambiente e nenhum teste falhando. Os resultados e limites estão em [CORRECOES_WEBRTC.md](../../docs/CORRECOES_WEBRTC.md). O workflow do GitHub exige RTP sem skips para validar a liberação.
 
+A execução completa no [GitHub Actions](https://github.com/matarazus/etim/actions/runs/39975512632) foi aprovada com os testes RTP obrigatórios. A limitação local não se aplica a esse resultado remoto; a validação de Safari real permanece separada.
+
 ## Executar
 
 Requisitos: Node.js 24+, npm e Chromium/Chrome com suporte a WebRTC. Não requer Supabase nem credenciais.

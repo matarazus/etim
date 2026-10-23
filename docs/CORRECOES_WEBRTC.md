@@ -28,6 +28,10 @@ O workflow `WebRTC regression tests` instala o Chromium oficial do Playwright no
 
 O workflow roda ao enviar esta branch, em pull requests e em `main`. Ele não publica o Pages. A publicação precisa aguardar a execução completa dos testes de mídia; a aprovação local com skips não basta. Safari/iPhone e a integração com Supabase/Cloudflare precisam da matriz de aparelhos descrita na auditoria.
 
+**Execução completa aprovada no GitHub Actions:** [run 39975512632](https://github.com/matarazus/etim/actions/runs/39975512632), commit `a5a2da14ad6592caa51999c83d5a85f822af64e2`. A suíte de 35 testes terminou com sucesso com `REQUIRE_WEBRTC_MEDIA=1`, incluindo os seis cenários de RTP bloqueados localmente. O [registro da execução](webrtc-ci.json) identifica o commit e os passos aprovados. Também passou a execução anterior, `39975206307`.
+
+Essa validação cobre mídia nativa entre participantes Chromium no laboratório, inclusive áudio bidirecional, câmera tardia, câmera/tela separadas, três participantes e recuperação de resposta perdida. O serviço Supabase e o provedor TURN continuam simulados nas fronteiras. Safari/iPhone e Cloudflare TURN implantado não foram testados nesta execução.
+
 ## Operação
 
 Após uma eventual publicação, todos os participantes devem recarregar a página para usar a mesma versão do protocolo. O cliente ainda entende ofertas do protocolo anterior com três seções de mídia, mas o cliente antigo continua contendo seus próprios defeitos; uma chamada mista não valida a correção.
