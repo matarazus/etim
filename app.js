@@ -77,6 +77,9 @@
     demoChat:safeJSON('etim_demo_chat',safeJSON('nexo_demo_chat',{})), profile:safeJSON('etim_demo_profile',safeJSON('nexo_demo_profile',{nickname:'Você',color:'#897df1',photo:''})),
     liveChat:{}, search:'', muted:false, voiceRoom:null, microphone:null, screen:null, camera:null, peers:new Map(), remoteVideos:new Map(), remoteCameras:new Map(),
     noticeClosed:false, loading:false, audioPromptAt:0,
+    sharedReady:false,sharedErrorShown:false,sharedRefreshTask:null,sharedRefreshAgain:false,
+    group:{name:'etim',description:'Para conversar, jogar e ficar de boa.'},jams:new Map(),
+    focusedVideo:null,callStartedAt:null,callTimer:null,presenceTask:Promise.resolve(),
     voiceSession:null,voiceJoinRequest:null,voiceInitialization:null,voiceReady:false,voiceWatchdog:null,signalTasks:new Map(),earlyIce:new Map(),
     retiredPeerGenerations:new Set(),cameraRequest:null,screenRequest:null,
     voiceDepartures:new Map(),voicePresenceHeartbeat:0,
@@ -132,8 +135,9 @@
     if(active){
       $('#mediaViewTitle').textContent=voiceName(state.voiceRoom);
       const live=state.presence.filter(p=>p.voiceRoom===state.voiceRoom&&(p.isCameraOn||p.isStreaming)).length;
-      $('#chatVoiceBanner').innerHTML=`<strong>🎧 ${esc(voiceName(state.voiceRoom))}</strong><button type="button" id="openMediaBanner">${live?live+' ao vivo · ':''} Abrir chamada ↗</button>`;
+      $('#chatVoiceBanner').innerHTML=`<div><strong>🎧 ${esc(voiceName(state.voiceRoom))}</strong><small class="banner-duration" data-call-duration></small></div><button type="button" id="openMediaBanner">${live?live+' ao vivo · ':''} Abrir chamada ↗</button>`;
       if(!open)$('#openMediaBanner').onclick=openMedia;
+      updateCallClock();
     }
   }
   function monitorTrack(id,track){
@@ -165,12 +169,183 @@
       },110);
     }catch(err){console.warn('Indicador de fala:',err)}
   }
+  function formatCallDuration(start,now=Date.now()){
+    const seconds=Math.max(0,Math.floor((now-start)/1000));
+    return [Math.floor(seconds/3600),Math.floor(seconds/60)%60,seconds%60].map(v=>String(v).padStart(2,'0')).join(':');
+  }
+  function updateCallClock(){
+    const label=state.callStartedAt===null?'':'Conectado há '+formatCallDuration(state.callStartedAt);
+    $$('[data-call-duration]').forEach(el=>el.textContent=label);
+  }
+  function startCallClock(){
+    clearInterval(state.callTimer);state.callStartedAt=Date.now();
+    state.callTimer=setInterval(updateCallClock,1000);updateCallClock();
+  }
+  function stopCallClock(){
+    clearInterval(state.callTimer);state.callTimer=null;state.callStartedAt=null;state.focusedVideo=null;
+    clearInterval(state.speechTimer);state.speechTimer=null;
+  }
+  function remoteVideoActive(id,info,kind){
+    const person=state.presence.find(p=>p.id===id),peer=state.peers.get(id);
+    return !!(state.voiceRoom&&peer&&person?.voiceRoom===state.voiceRoom&&
+      person.voiceSession===peer.remoteSession&&person[kind==='cam'?'isCameraOn':'isStreaming']===true&&
+      info.active&&info.track.readyState==='live'&&!info.track.muted);
+  }
+  function releaseVideo(video){
+    if(!video)return;
+    video.onloadeddata=null;video.onplaying=null;video.pause();video.srcObject=null;
+  }
+  function applyVideoFocus(){
+    const grid=$('#voiceStage .video-grid');if(!grid)return;
+    const tiles=[...grid.children],available=tiles.filter(t=>!t.classList.contains('awaiting-frame'));
+    if(!available.some(t=>t.querySelector('video')?.id===state.focusedVideo))state.focusedVideo=null;
+    grid.classList.toggle('has-focus',!!state.focusedVideo);
+    for(const tile of tiles){
+      const focused=tile.querySelector('video')?.id===state.focusedVideo;
+      tile.classList.toggle('is-focused',focused);
+      const button=tile.querySelector('[data-focus-video]');if(button)button.setAttribute('aria-pressed',String(focused));
+    }
+    $('#returnGrid')?.classList.toggle('hidden',!state.focusedVideo);
+  }
   function stopMonitor(id){const m=state.audioMonitors.get(id);if(m){m.source.disconnect();state.audioMonitors.delete(id)}state.speaking.delete(id)}
+  // Configuração compartilhada: banco é a fonte de verdade; nunca localStorage.
+  const defaultChannels=channels.map(c=>({...c,kind:'text',protected:true}));
+  const defaultVoiceChannels=voiceChannels.map(c=>({...c,kind:'voice',protected:true}));
+  const jamPattern=/^https:\/\/(spotify\.link\/[A-Za-z0-9_-]+|open\.spotify\.com\/jam\/[A-Za-z0-9_-]+)(\?si=[A-Za-z0-9_-]+)?$/;
+  function validateJamUrl(value){
+    const url=String(value||'').trim();
+    if(url.length>512||!jamPattern.test(url))return null;
+    return url;
+  }
+  function sharedAvailable(){
+    if(state.live&&state.sharedReady)return true;
+    debounceToast(state.live?'Configuração compartilhada indisponível. Aplique a migration do Supabase e tente novamente.':'Entre no etim online para compartilhar alterações com o grupo.',true);
+    return false;
+  }
+  function renderGroup(){
+    $('#groupDisplayName').textContent=state.group.name;
+    $('#groupDescription').textContent=state.group.description;
+    $('#workspaceSettings').title='Editar espaço '+state.group.name;
+  }
+  async function fetchSharedSettings(){
+    if(!state.live||!state.sb?.from)return;
+    // Serializa snapshots: eventos concorrentes não podem restaurar dados antigos.
+    state.sharedRefreshAgain=true;
+    if(state.sharedRefreshTask)return state.sharedRefreshTask;
+    state.sharedRefreshTask=(async()=>{
+      while(state.sharedRefreshAgain){
+        state.sharedRefreshAgain=false;
+        const [catalog,group,jams]=await Promise.all([
+          state.sb.from('etim_channels').select('*').order('sort_order').order('id'),
+          state.sb.from('etim_group_settings').select('*').eq('id',true).single(),
+          state.sb.from('etim_room_jams').select('*')
+        ]);
+        const error=catalog.error||group.error||jams.error;
+        if(error){
+          state.sharedReady=false;
+          if(!state.sharedErrorShown){state.sharedErrorShown=true;debounceToast('Canais personalizados e Jam aguardam a configuração do Supabase. Chat e chamadas continuam disponíveis.',true)}
+          console.warn('Configuração compartilhada:',error.message);continue;
+        }
+        const rows=(catalog.data||[]).filter(c=>!c.archived_at);
+        if(!rows.some(c=>c.id==='geral'&&c.kind==='text')){state.sharedReady=false;continue}
+        const convert=c=>({...c,desc:c.description,welcome:c.description||'Um espaço para conversar com a galera.',icon:[...defaultChannels,...defaultVoiceChannels].find(d=>d.id===c.id)?.icon||(c.kind==='voice'?'volume-2':'hash')});
+        channels.splice(0,channels.length,...rows.filter(c=>c.kind==='text').map(convert));
+        voiceChannels.splice(0,voiceChannels.length,...rows.filter(c=>c.kind==='voice').map(convert));
+        state.group={name:group.data.name,description:group.data.description};
+        state.jams=new Map((jams.data||[]).map(j=>[j.room_id,{...j,url:validateJamUrl(j.url)}]));
+        state.sharedReady=true;state.sharedErrorShown=false;
+        if(!channels.some(c=>c.id===state.activeChannel)){await switchChannel('geral');debounceToast('O canal foi excluído. Você voltou ao #geral.')}
+        if(state.voiceRoom&&!voiceChannels.some(c=>c.id===state.voiceRoom)){await leaveVoice();debounceToast('Esta sala foi excluída por alguém do grupo.')}
+        renderGroup();renderChannels();renderHeader();renderMessages();renderVoiceStage();renderJamStatus();
+      }
+    })().catch(error=>{state.sharedReady=false;console.warn('Configuração compartilhada:',error)}).finally(()=>{state.sharedRefreshTask=null});
+    return state.sharedRefreshTask;
+  }
+  async function saveShared(button,operation,args,success){
+    if(!sharedAvailable()||button.disabled)return false;
+    button.disabled=true;
+    try{
+      const {error}=await state.sb.rpc(operation,args);if(error)throw error;
+      await fetchSharedSettings();debounceToast(success);return true;
+    }catch(error){
+      debounceToast(error.code==='23505'?'Já existe um canal com esse nome.':'Não foi possível salvar. Confira sua conexão e tente novamente.',true);
+      console.warn(operation,error.message);return false;
+    }finally{if(button.isConnected)button.disabled=false}
+  }
+  function validLabel(value,max){return value.trim().length>=2&&value.trim().length<=max&&!/[\u0000-\u001f\u007f]/.test(value)}
+  function showChannelEditor(kind,id=null){
+    if(!sharedAvailable())return;
+    const channel=(kind==='voice'?voiceChannels:channels).find(c=>c.id===id);
+    if(id&&!channel)return;
+    const title=channel?'Editar canal':kind==='voice'?'Criar sala de voz':'Criar canal de texto';
+    showModal(`<h2 id="modalTitle">${title}</h2><p>Todos os amigos do etim podem alterar o nome e a descrição.</p>
+      <form id="channelEditor"><label for="channelName">Nome</label><input id="channelName" required minlength="2" maxlength="40" value="${esc(channel?.name||'')}" />
+      <label for="channelDescription">Descrição</label><input id="channelDescription" maxlength="180" value="${esc(channel?.desc||'')}" />
+      <button class="primary" type="submit">Salvar</button></form>
+      ${channel?(channel.protected?'<p class="note">Canal principal protegido contra exclusão.</p>':'<button id="deleteChannel" type="button" class="secondary danger">Excluir canal…</button>'):''}`);
+    $('#channelEditor').onsubmit=async e=>{
+      e.preventDefault();const name=$('#channelName').value.trim(),description=$('#channelDescription').value.trim();
+      if(!validLabel(name,40)||/[\u0000-\u001f\u007f]/.test(description))return debounceToast('Use um nome de 2 a 40 caracteres, sem quebras de linha.',true);
+      const form=e.currentTarget;
+      if(await saveShared(form.querySelector('button'),'etim_save_channel',{channel_id:id,channel_kind:kind,channel_name:name,channel_description:description},'Canal salvo para todos.')){if(form.isConnected)closeModal()}
+    };
+    if($('#deleteChannel'))$('#deleteChannel').onclick=()=>{
+      showModal(`<h2 id="modalTitle">Excluir ${esc(channel.name)}?</h2><p>O canal sairá da lista de todos. ${kind==='voice'?'Quem estiver nesta sala será desconectado.':'O histórico será preservado no banco.'} Esta ação não remove contas.</p><button class="primary danger" id="confirmDelete">Excluir canal</button><button class="secondary" id="cancelDelete">Cancelar</button>`);
+      $('#cancelDelete').onclick=()=>showChannelEditor(kind,id);
+      $('#confirmDelete').onclick=async e=>{const button=e.currentTarget;if(await saveShared(button,'etim_archive_channel',{channel_id:id},'Canal excluído.')){if(button.isConnected)closeModal()}};
+    };
+  }
+  function showGroupEditor(){
+    if(!sharedAvailable())return;
+    showModal(`<h2 id="modalTitle">Personalizar espaço</h2><p>O nome de exibição é compartilhado com seus amigos. A marca do aplicativo continua sendo etim.</p>
+      <form id="groupEditor"><label for="groupName">Nome do espaço</label><input id="groupName" minlength="2" maxlength="40" required value="${esc(state.group.name)}" />
+      <label for="groupSubtitle">Descrição</label><input id="groupSubtitle" maxlength="180" value="${esc(state.group.description)}" />
+      <button class="primary" type="submit">Salvar para todos</button></form>`);
+    $('#groupEditor').onsubmit=async e=>{
+      e.preventDefault();const name=$('#groupName').value.trim(),description=$('#groupSubtitle').value.trim();
+      if(!validLabel(name,40)||/[\u0000-\u001f\u007f]/.test(description))return debounceToast('Confira o nome e a descrição.',true);
+      const form=e.currentTarget;
+      if(await saveShared(form.querySelector('button'),'etim_save_group',{group_name:name,group_description:description},'Espaço atualizado para todos.')){if(form.isConnected)closeModal()}
+    };
+  }
+  function renderJamStatus(){
+    const panel=$('#jamSharedStatus');if(!panel)return;
+    const room=panel.dataset.room;
+    if(room!==state.voiceRoom){closeModal();return}
+    const jam=state.jams.get(room),url=validateJamUrl(jam?.url);
+    panel.innerHTML=url?`<p>Convite compartilhado por ${esc(state.memberMap.get(jam.updated_by)?.nickname||'um amigo')}. Se expirou, peça um novo link.</p>
+      <a class="primary external-action" href="${esc(url)}" target="_blank" rel="noopener noreferrer">Entrar na Jam ↗</a>
+      <button class="secondary" id="copyJam">Copiar convite</button><button class="secondary" id="shareJam">Compartilhar convite</button>
+      <button class="secondary" id="removeJam">Encerrar compartilhamento no etim</button>`:'<p>Nenhuma Jam compartilhada nesta sala.</p>';
+    if(!url)return;
+    $('#copyJam').onclick=async()=>{try{await navigator.clipboard.writeText(url);debounceToast('Convite copiado.')}catch{debounceToast('Não foi possível copiar. Use o link “Entrar na Jam” para copiar o endereço.',true)}};
+    $('#shareJam').onclick=async()=>{try{if(navigator.share)await navigator.share({title:'Jam da galera no Spotify',url});else{await navigator.clipboard.writeText(url);debounceToast('Convite copiado.')}}catch(error){if(error.name!=='AbortError')debounceToast('Não foi possível compartilhar o convite.',true)}};
+    $('#removeJam').onclick=async e=>{await saveShared(e.currentTarget,'etim_share_jam',{voice_room:room,jam_url:null},'Convite removido do etim. A Jam continua no Spotify.')};
+  }
+  function showJam(){
+    if(!state.voiceRoom)return;
+    const room=state.voiceRoom;
+    showModal(`<h2 id="modalTitle">🎵 Ouvir juntos</h2><p>Uma Jam para a ${esc(voiceName(room))}. Cada pessoa ouve pelo próprio Spotify.</p>
+      <div id="jamSharedStatus" data-room="${esc(room)}"></div>
+      <details class="jam-instructions"><summary>Criar uma Jam</summary><p>No aplicativo oficial do Spotify, abra uma música e procure “Iniciar uma Jam” no menu de opções ou de dispositivos. Compartilhe o convite e cole o link abaixo. A disponibilidade e as exigências de Premium são definidas pelo Spotify.</p>
+      <a class="secondary external-action" href="https://open.spotify.com/" target="_blank" rel="noopener noreferrer">Abrir Spotify ↗</a></details>
+      <form id="jamForm"><label for="jamUrl">Compartilhar ou atualizar Jam</label><input id="jamUrl" type="url" maxlength="512" required placeholder="https://spotify.link/…" aria-describedby="jamUrlHelp" />
+      <p class="note" id="jamUrlHelp">Cole o convite oficial spotify.link ou open.spotify.com/jam. O etim não cria nem controla a Jam.</p><button type="submit" class="primary" ${state.sharedReady?'':'disabled'}>Compartilhar com a sala</button></form>
+      ${state.sharedReady?'':'<p class="note">Entre online e configure a migration do Supabase para compartilhar convites.</p>'}`);
+    renderJamStatus();
+    $('#jamForm').onsubmit=async e=>{
+      e.preventDefault();if(state.voiceRoom!==room)return;
+      const url=validateJamUrl($('#jamUrl').value);if(!url)return debounceToast('Use um link de convite oficial do Spotify Jam, sem outros endereços ou parâmetros.',true);
+      const form=e.currentTarget;
+      if(await saveShared(form.querySelector('button'),'etim_share_jam',{voice_room:room,jam_url:url},'Convite da Jam compartilhado.')){if(form.isConnected)form.reset()}
+    };
+  }
+
   function renderChannels(){
-    $('#textChannels').innerHTML=channels.map(ch=>`<button class="channel-button ${ch.id===state.activeChannel?'active':''}" data-text="${ch.id}" aria-current="${ch.id===state.activeChannel?'page':'false'}">${icon(ch.icon)}<span>${esc(ch.name)}</span></button>`).join('');
+    $('#textChannels').innerHTML=channels.map(ch=>`<div class="channel-row"><button class="channel-button ${ch.id===state.activeChannel?'active':''}" data-text="${esc(ch.id)}" aria-current="${ch.id===state.activeChannel?'page':'false'}">${icon(ch.icon)}<span>${esc(ch.name)}</span></button><button class="channel-options" data-edit-channel="${esc(ch.id)}" data-kind="text" aria-label="Editar canal ${esc(ch.name)}" title="Renomear ou editar canal">⋯</button></div>`).join('');
     $('#voiceChannels').innerHTML=voiceChannels.map(ch=>{
       const users=state.live?state.presence.filter(p=>p.voiceRoom===ch.id):state.voiceRoom===ch.id?[{id:myId(),nickname:state.profile.nickname,color:state.profile.color,isMuted:state.muted}]:[];
-      return `<div><button class="channel-button ${state.voiceRoom===ch.id?'voice-active':''}" data-voice="${ch.id}" title="Entrar na sala ${esc(ch.name)}">${icon(ch.icon)}<span>${esc(ch.name)}</span>${users.length?`<small style="margin-left:auto;color:#7ad6ac">${users.length}</small>`:''}</button>${users.map(p=>`<div class="voice-person ${isTalking(p.id)?'is-speaking':''}" data-speaker-id="${esc(p.id)}">${avatar(p.nickname,p.color,'voice-mini',ownPhoto(p.id))}<span>${esc(p.nickname)}${p.isMuted?' (mudo)':''}</span>${p.isStreaming?`<button class="watch-media" data-watch="${esc(p.id)}">● Ao vivo</button>`:p.isCameraOn?`<button class="watch-media" data-watch="${esc(p.id)}">Câmera</button>`:''}</div>`).join('')}</div>`;
+      return `<div><div class="channel-row"><button class="channel-button ${state.voiceRoom===ch.id?'voice-active':''}" data-voice="${esc(ch.id)}" title="Entrar na sala ${esc(ch.name)}">${icon(ch.icon)}<span>${esc(ch.name)}</span>${users.length?`<small style="margin-left:auto;color:#7ad6ac">${users.length}</small>`:''}</button><button class="channel-options" data-edit-channel="${esc(ch.id)}" data-kind="voice" aria-label="Editar sala ${esc(ch.name)}" title="Renomear ou editar sala">⋯</button></div>${ch.desc?`<small class="channel-description">${esc(ch.desc)}</small>`:''}${users.map(p=>`<div class="voice-person ${isTalking(p.id)?'is-speaking':''}" data-speaker-id="${esc(p.id)}">${avatar(p.nickname,p.color,'voice-mini',ownPhoto(p.id))}<span>${esc(p.nickname)}${p.isMuted?' (mudo)':''}</span>${p.isStreaming?`<button class="watch-media" data-watch="${esc(p.id)}">● Ao vivo</button>`:p.isCameraOn?`<button class="watch-media" data-watch="${esc(p.id)}">Câmera</button>`:''}</div>`).join('')}</div>`;
     }).join('');
   }
   function renderHeader(){const ch=channelOf(state.activeChannel);$('#currentChannelLabel').textContent=ch.name;$('#currentChannelTagline').textContent=ch.desc;$('#topChannelIcon').innerHTML=icon(ch.icon);$('#messageInput').placeholder=`Mensagem em #${ch.name}`;}
@@ -208,12 +383,18 @@
     $('#modePill').className='mode-pill'+(state.live?' live':'');$('#modePill').innerHTML=`<span class="small-dot"></span> ${state.live?'AO VIVO':'DEMO'}`;
     $('#demoNotice').classList.toggle('hidden',state.live||state.noticeClosed);
   }
-  function renderAll(){renderProfile();renderHeader();renderChannels();renderMembers();renderMessages();renderVoiceStage();}
+  function renderAll(){renderGroup();renderProfile();renderHeader();renderChannels();renderMembers();renderMessages();renderVoiceStage();}
   function closeMobile(){ $('#sidebar').classList.remove('open');$('#membersPanel').classList.remove('open');$('#mobileScrim').classList.add('hidden');}
   function toggleMobile(id){let node=$(id);const opening=!node.classList.contains('open');closeMobile();if(opening){node.classList.add('open');$('#mobileScrim').classList.remove('hidden')}}
   async function switchChannel(id){if(!channels.some(c=>c.id===id))return;state.activeChannel=id;state.search='';$('#searchInput').value='';$('#searchDrawer').classList.add('hidden');renderHeader();renderChannels();renderMessages();closeMobile();if(state.live)await fetchMessages(id)}
-  function showModal(body, closable=true){$('#modalContent').innerHTML=body;$('#modalOverlay').classList.remove('hidden');$('#modalClose').classList.toggle('hidden',!closable);}
-  function closeModal(){ $('#modalOverlay').classList.add('hidden') }
+  let modalReturnFocus=null;
+  function showModal(body, closable=true){
+    if($('#modalOverlay').classList.contains('hidden'))modalReturnFocus=document.activeElement;
+    $('#modalContent').innerHTML=body;$('#modalOverlay').classList.remove('hidden');$('#modalClose').classList.toggle('hidden',!closable);
+    const heading=$('#modalContent h2');if(heading)heading.id='modalTitle';
+    ($('#modalContent input')||$('#modalContent button')||$('#modalClose')).focus();
+  }
+  function closeModal(){ $('#modalOverlay').classList.add('hidden');const target=modalReturnFocus?.isConnected?modalReturnFocus:document.getElementById(modalReturnFocus?.id||'');target?.focus();modalReturnFocus=null }
   function showHowTo(){showModal(`<div class="modal-mark">✦</div><h2>Coloque o etim online.</h2><p>O visual já funciona. Para conversar com a galera, é só conectar um projeto Supabase gratuito.</p><ol><li>Crie um projeto em <b>supabase.com</b>.</li><li>Ative o login anônimo em <b>Authentication → Providers → Anonymous</b>.</li><li>No SQL Editor, execute <code>supabase.sql</code> com o convite definido como <b>a mesma senha geral</b>, sem publicar o código no repositório.</li><li>Em <b>config.js</b>, preencha a URL e a chave <i>publishable</i> / <i>anon</i> (pública).</li><li>Publique os arquivos no GitHub Pages e compartilhe o link.</li></ol><p class="note">Consulte o README.md incluso no projeto. Nunca insira a chave service_role no site.</p><button class="primary" id="modalOk">Entendi!</button>`);$('#modalOk').onclick=closeModal}
   function showAbout(){showModal(`<div class="modal-mark">✳</div><h2>Bem-vindo ao etim.</h2><p>O seu espaço para ficar perto da galera. Uma primeira versão feita para experimentar canais de texto, salas de voz, câmera e transmissão de tela.</p><p><b>Modo demo:</b> as mensagens são locais deste navegador; ninguém mais as recebe.<br><b>Modo online:</b> use Supabase para conversar em tempo real com seus amigos.</p><button class="primary" id="modalOk">Bora explorar</button>`);$('#modalOk').onclick=closeModal}
   function showInvite(){
@@ -350,19 +531,22 @@
     const uid=sess.data.session.user.id;
     const m=await state.sb.from('club_members').select('user_id,nickname,color').eq('user_id',uid).single();if(m.error)throw m.error;
     state.user={id:uid,nickname:m.data.nickname,color:m.data.color};state.live=true;
-    await fetchMembers();await fetchMessages(state.activeChannel);
+    await fetchMembers();await fetchSharedSettings();await fetchMessages(state.activeChannel);
     await state.sb.realtime.setAuth(sess.data.session.access_token);
     if(state.channel)await state.sb.removeChannel(state.channel);
     state.channel=state.sb.channel('etim:lobby',{config:{private:true,broadcast:{ack:true},presence:{key:uid}}});
     state.channel.on('presence',{event:'sync'},()=>{refreshPresence();syncPeers()})
       .on('broadcast',{event:'signal'},({payload})=>queueSignal(payload))
       .on('broadcast',{event:'voice-presence'},({payload})=>handleVoicePresenceEvent(payload))
+      .on('postgres_changes',{event:'*',schema:'public',table:'etim_channels'},fetchSharedSettings)
+      .on('postgres_changes',{event:'*',schema:'public',table:'etim_group_settings'},fetchSharedSettings)
+      .on('postgres_changes',{event:'*',schema:'public',table:'etim_room_jams'},fetchSharedSettings)
       .on('postgres_changes',{event:'INSERT',schema:'public',table:'chat_messages'},({new:row})=>{
         if(!state.liveChat[row.channel])state.liveChat[row.channel]=[];
         if(!state.liveChat[row.channel].some(m=>m.id===row.id))state.liveChat[row.channel].push(row);
         if(row.channel===state.activeChannel)renderMessages();
       }).subscribe(async status=>{
-        if(status==='SUBSCRIBED')await updatePresence();
+        if(status==='SUBSCRIBED'){await updatePresence();await fetchSharedSettings()}
         if(['CHANNEL_ERROR','TIMED_OUT'].includes(status))debounceToast('Canal em tempo real indisponível. Verifique as políticas do Supabase.',true);
       });
     renderAll();
@@ -452,7 +636,11 @@
       payload:{kind:'leave',from:myId(),room,session}
     })).catch(err=>console.warn('Saida da sala nao anunciada:',err));
   }
-  async function updatePresence(){if(!state.channel||!state.user)return;try{await state.channel.track({id:myId(),nickname:state.user.nickname,color:state.user.color,voiceRoom:state.voiceRoom,isMuted:state.muted,isStreaming:!!state.screen,isCameraOn:!!state.camera,photo:safePhoto(state.profile.photo),voiceSession:state.voiceSession,at:new Date().toISOString()})}catch(e){console.warn('Presence',e)}}
+  async function updatePresence(){
+    state.presenceTask=state.presenceTask.catch(()=>{}).then(async()=>{
+    if(!state.channel||!state.user)return;try{const result=await state.channel.track({id:myId(),nickname:state.user.nickname,color:state.user.color,voiceRoom:state.voiceRoom,isMuted:state.muted,isStreaming:!!state.screen,isCameraOn:!!state.camera,photo:safePhoto(state.profile.photo),voiceSession:state.voiceSession,at:new Date().toISOString()});if(result==='error'||result==='timed out')console.warn('Presence não confirmada:',result)}catch(e){console.warn('Presence',e)}
+    });return state.presenceTask;
+  }
 
   // WebRTC P2P: quem tem ID menor inicia a oferta. ICE precoce é guardado até a descrição remota.
   // Cada renegociação recebe um ID próprio; sinais antigos de tentativas anteriores são ignorados.
@@ -518,7 +706,7 @@
     if(state.voiceJoinRequest!==joinRequest)return;
     // Criar/retomar o AudioContext no clique ajuda o Safari a reproduzir os sons e a voz.
     voiceCue('join');
-    state.voiceRoom=room;state.voiceSession=newVoiceId();state.muted=true;
+    state.voiceRoom=room;state.voiceSession=newVoiceId();state.muted=true;startCallClock();
     const joiningSession=state.voiceSession;
     state.voiceReady=false;
     const initialization={session:joiningSession};
@@ -554,7 +742,7 @@
   async function leaveVoice(silent=false,joinRequest=null){
     state.voiceJoinRequest=joinRequest;
     if(!state.voiceRoom)return;
-    const oldRoom=state.voiceRoom,oldSession=state.voiceSession;
+    const oldRoom=state.voiceRoom,oldSession=state.voiceSession;stopCallClock();
     if(silent!==true)voiceCue('leave');
     clearInterval(state.voiceWatchdog);state.voiceWatchdog=null;
     // Anuncia a saida antes do Presence se atualizar; protege contra snapshots atrasados.
@@ -584,10 +772,15 @@
       if(state.retiredPeerGenerations.size>64)state.retiredPeerGenerations.delete(state.retiredPeerGenerations.values().next().value);
       peer.pc.onicecandidate=null;peer.pc.ontrack=null;
       peer.pc.onconnectionstatechange=null;peer.pc.oniceconnectionstatechange=null;
+      if(peer.audioTrack)peer.audioTrack.onunmute=null;
       if(peer.audio){peer.audio.pause();peer.audio.srcObject=null;peer.audio.remove()}
       peer.pc.close();state.peers.delete(id);
     }
-    state.remoteVideos.delete(id);state.remoteCameras.delete(id);stopMonitor(id);
+    for(const map of [state.remoteVideos,state.remoteCameras]){
+      const info=map.get(id);if(info){info.track.onmute=null;info.track.onunmute=null;info.track.onended=null}
+      map.delete(id);
+    }
+    stopMonitor(id);
     state.videoHealth.delete('cam:'+id);state.videoHealth.delete('screen:'+id);
   }
   function syncPeers(){
@@ -678,24 +871,27 @@
           });
         }
         playIncoming();
-        track.addEventListener('unmute',playIncoming);
+        if(peer.audioTrack)peer.audioTrack.onunmute=null;
+        peer.audioTrack=track;track.onunmute=playIncoming;
       }else if(track.kind==='video'){
         const isScreen=ev.transceiver.mid===peer.mediaMids?.screen;
         if(!isScreen&&ev.transceiver.mid!==peer.mediaMids?.camera)return;
+        const previous=(isScreen?state.remoteVideos:state.remoteCameras).get(id);
+        if(previous){previous.track.onmute=null;previous.track.onunmute=null;previous.track.onended=null}
         const info={stream:new MediaStream([track]),track,active:!track.muted,mid:ev.transceiver?.mid};
         (isScreen?state.remoteVideos:state.remoteCameras).set(id,info);
         const prefix=isScreen?'screen:':'cam:';
         track.onunmute=()=>{
-          if(state.peers.get(id)!==peer)return;
+          if(state.peers.get(id)!==peer||(isScreen?state.remoteVideos:state.remoteCameras).get(id)!==info)return;
           info.active=true;state.videoHealth.delete(prefix+id);
           renderVoiceStage();
         };
         track.onmute=()=>{
-          if(state.peers.get(id)!==peer)return;
+          if(state.peers.get(id)!==peer||(isScreen?state.remoteVideos:state.remoteCameras).get(id)!==info)return;
           info.active=false;renderVoiceStage();
         };
         track.onended=()=>{
-          if(state.peers.get(id)!==peer)return;
+          if(state.peers.get(id)!==peer||(isScreen?state.remoteVideos:state.remoteCameras).get(id)!==info)return;
           info.active=false;renderVoiceStage();
         };
         renderVoiceStage();
@@ -919,7 +1115,7 @@
     try{
       for(const [kind,map] of [['cam',state.remoteCameras],['screen',state.remoteVideos]]){
         for(const [id,info] of map){
-          if(!info.active||!state.peers.has(id))continue;
+          if(!remoteVideoActive(id,info,kind))continue;
           const peer=state.peers.get(id);
           const key=kind+':'+id, now=Date.now();
           const current=state.videoHealth.get(key)||{lastFrames:-1,lastProgress:now,status:'Aguardando imagem'};
@@ -1217,9 +1413,10 @@
     state.cameraRequest=null;
     if(!state.camera)return;
     const old=state.camera;state.camera=null;
+    renderVoiceStage();const presence=updatePresence();
     await refreshMediaConnections('camera',null);
     old.getTracks().forEach(t=>{t.onended=null;t.stop()});
-    await updatePresence();renderVoiceStage();
+    await presence;renderVoiceStage();
   }
   async function startScreen(){
     if(!state.voiceRoom){debounceToast('Entre em uma sala de voz antes de transmitir.',true);return}
@@ -1241,14 +1438,16 @@
     state.screenRequest=null;
     if(!state.screen)return;
     const old=state.screen;state.screen=null;
+    renderVoiceStage();const presence=updatePresence();
     await refreshMediaConnections('screen',null);
-    old.getTracks().forEach(t=>{t.onended=null;t.stop()});await updatePresence();renderVoiceStage();
+    old.getTracks().forEach(t=>{t.onended=null;t.stop()});await presence;renderVoiceStage();
   }
   // Mantem os players montados. Recriar <video> em toda atualizacao do Presence
   // interrompia streams WebRTC e podia deixar tela preta no Safari/iPhone.
   function renderVoiceStage(){
     const stage=$('#voiceStage'),connected=!!state.voiceRoom;
-    stage.classList.toggle('hidden',!connected);$('#voiceTray').classList.toggle('hidden',!connected);renderMediaView();if(!connected)return;
+    const focusedControl=stage.contains(document.activeElement)?document.activeElement.id:null;
+    stage.classList.toggle('hidden',!connected);$('#voiceTray').classList.toggle('hidden',!connected);renderMediaView();if(!connected){$$('video',stage).forEach(releaseVideo);stage.replaceChildren();delete stage.dataset.room;return}
     $('#voiceTrayRoom').textContent=voiceName(state.voiceRoom);
     const me=state.user||state.profile,mePhoto=ownPhoto(myId());
     $('#voiceTrayAvatar').style.background=me.color||'#897df1';
@@ -1256,28 +1455,31 @@
     $('#voiceTrayAvatar').innerHTML=mePhoto?`<img alt="" src="${esc(mePhoto)}" />`:esc(initials(me.nickname));
     const people=state.live?state.presence.filter(p=>p.voiceRoom===state.voiceRoom):[];
     const participants=state.live?people:[{id:myId(),nickname:state.profile.nickname,color:state.profile.color,isMuted:state.muted,isCameraOn:!!state.camera}];
-    const remoteScreens=[...state.remoteVideos.entries()].filter(([id,s])=>s.active&&state.peers.has(id));
-    const remoteCameras=[...state.remoteCameras.entries()].filter(([id,s])=>s.active&&state.peers.has(id));
-    const cameraTiles=(state.camera?`<div class="video-tile is-camera"><video id="myCameraPreview" autoplay muted playsinline></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-tile-label">Sua câmera · ${state.live?'ao vivo':'prévia local'}</span></div>`:'')+
-      remoteCameras.map(([id])=>`<div class="video-tile is-camera is-remote-camera"><video autoplay muted playsinline id="cam-${esc(id)}"></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-health hidden" data-video-health></span><span class="video-tile-label">Câmera de ${esc(state.memberMap.get(id)?.nickname||'Amigo')}</span></div>`).join('');
-    const screenTiles=(state.screen?`<div class="video-tile is-screen"><video id="myScreenPreview" autoplay muted playsinline></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-tile-label">Sua tela · ${state.live?'transmitindo':'prévia local'}</span></div>`:'')+
-      remoteScreens.map(([id])=>`<div class="video-tile is-screen"><video autoplay muted playsinline id="remote-${esc(id)}"></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-health hidden" data-video-health></span><span class="video-tile-label">Tela de ${esc(state.memberMap.get(id)?.nickname||'Amigo')}</span></div>`).join('');
-    const nextMarkup=`<div class="voice-stage-header"><div class="stage-icon">${icon('radio')}</div><div><h3>Você está na ${esc(voiceName(state.voiceRoom))}</h3><p>${state.live?'Áudio, câmera e tela em WebRTC · experimental':'Modo demonstração · prévia local de microfone, câmera e tela'}</p></div><span class="mode-pill ${state.live?'live':''}">${state.live?'AO VIVO':'DEMO'}</span></div>
+    const remoteScreens=[...state.remoteVideos.entries()].filter(([id,s])=>remoteVideoActive(id,s,'screen'));
+    const remoteCameras=[...state.remoteCameras.entries()].filter(([id,s])=>remoteVideoActive(id,s,'cam'));
+    const cameraTiles=(state.camera?`<div class="video-tile awaiting-frame is-camera"><video id="myCameraPreview" autoplay muted playsinline></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-tile-label">Sua câmera · ${state.live?'ao vivo':'prévia local'}</span></div>`:'')+
+      remoteCameras.map(([id])=>`<div class="video-tile awaiting-frame is-camera is-remote-camera"><video autoplay muted playsinline id="cam-${esc(id)}"></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-health hidden" data-video-health></span><span class="video-tile-label">Câmera de ${esc(state.memberMap.get(id)?.nickname||'Amigo')}</span></div>`).join('');
+    const screenTiles=(state.screen?`<div class="video-tile awaiting-frame is-screen"><video id="myScreenPreview" autoplay muted playsinline></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-tile-label">Sua tela · ${state.live?'transmitindo':'prévia local'}</span></div>`:'')+
+      remoteScreens.map(([id])=>`<div class="video-tile awaiting-frame is-screen"><video autoplay muted playsinline id="remote-${esc(id)}"></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-health hidden" data-video-health></span><span class="video-tile-label">Tela de ${esc(state.memberMap.get(id)?.nickname||'Amigo')}</span></div>`).join('');
+    const nextMarkup=`<div class="voice-stage-header"><div class="stage-icon">${icon('radio')}</div><div><h3>Você está na ${esc(voiceName(state.voiceRoom))}</h3><p data-call-duration></p></div><span class="mode-pill ${state.live?'live':''}">${state.live?'AO VIVO':'DEMO'}</span></div>
       <div class="stage-participants">${participants.map(p=>`<div class="stage-person ${isTalking(p.id)?'is-speaking':''}" data-speaker-id="${esc(p.id)}">${avatar(p.nickname,p.color,'voice-participant-avatar',ownPhoto(p.id))}<span class="voice-person-name">${esc(p.nickname||'Você')}${p.id===myId()?' (você)':''}</span><span class="voice-person-status" title="${p.isMuted?'Microfone silenciado':'Microfone ativo'}">${icon(p.isMuted?'mic-off':'mic')}</span>${p.isCameraOn?`<span title="Câmera ligada" class="voice-person-status">${icon('video')}</span>`:''}</div>`).join('')||'<span style="color:#9e98b9">Conectando...</span>'}</div>
-      <div class="stage-controls"><button id="muteVoice" class="${state.muted?'negative':''}">${icon(state.muted?'mic-off':'mic')}${state.muted?'Ativar mic':'Silenciar'}</button><button id="activateAudio">${icon('volume-2')}Ativar som</button><button id="reconnectVoice">${icon('radio')}Reconectar</button><button id="diagnoseVoice">${icon('activity')}Diagnóstico</button><button id="voiceSounds">${icon('volume-2')}Sons ${state.voiceSounds?'ligados':'desligados'}</button><button id="toggleCamera" class="${state.camera?'camera-on':''}">${icon(state.camera?'video-off':'video')}${state.camera?'Desligar câmera':'Ligar câmera'}</button><button id="shareScreen" ${!state.screen&&!navigator.mediaDevices?.getDisplayMedia?'disabled title="Neste navegador, você pode assistir à tela compartilhada pelos amigos"':''}>${icon(state.screen?'monitor-off':'monitor-up')}${state.screen?'Parar transmissão':'Compartilhar tela'}</button><button class="danger" id="leaveVoice">${icon('phone-off')}Sair da sala</button></div>
-      <div class="video-grid">${cameraTiles}${screenTiles}</div>`;
+      <div class="stage-controls"><button id="muteVoice" aria-pressed="${state.muted}" class="${state.muted?'negative':''}">${icon(state.muted?'mic-off':'mic')}${state.muted?'Ativar mic':'Silenciar'}</button><button id="toggleCamera" aria-pressed="${!!state.camera}" class="${state.camera?'camera-on':''}">${icon(state.camera?'video-off':'video')}${state.camera?'Desligar câmera':'Ligar câmera'}</button><button id="shareScreen" aria-pressed="${!!state.screen}" ${!state.screen&&!navigator.mediaDevices?.getDisplayMedia?'disabled title="Neste navegador, você pode assistir à tela compartilhada pelos amigos"':''}>${icon(state.screen?'monitor-off':'monitor-up')}${state.screen?'Parar transmissão':'Compartilhar tela'}</button><button id="listenTogether" class="${state.jams.get(state.voiceRoom)?.url?'jam-active':''}">🎵 ${state.jams.get(state.voiceRoom)?.url?'Jam compartilhada':'Ouvir juntos'}</button><button class="danger" id="leaveVoice">${icon('phone-off')}Sair da sala</button>
+      <details class="call-tools"><summary>Mais opções</summary><div><button id="activateAudio">${icon('volume-2')}Ativar som</button><button id="reconnectVoice">${icon('radio')}Reconectar</button><button id="diagnoseVoice">${icon('radio')}Diagnóstico</button><button id="voiceSounds">${icon('volume-2')}Sons ${state.voiceSounds?'ligados':'desligados'}</button></div></details></div>
+      <button id="returnGrid" class="media-back hidden" type="button">Voltar ao grid</button><div class="video-grid">${cameraTiles}${screenTiles}</div>`;
     // Atualiza somente cabeçalho, pessoas e controles. A grade e os elementos
     // de vídeo continuam vivos, sem recriar srcObject a cada heartbeat.
     const candidate=document.createElement('div');
     candidate.innerHTML=nextMarkup;
     if(stage.dataset.room!==state.voiceRoom||!stage.querySelector('.video-grid')){
-      stage.innerHTML=nextMarkup;
+      $$('video',stage).forEach(releaseVideo);stage.innerHTML=nextMarkup;
       stage.dataset.room=state.voiceRoom;
     }else{
+      const toolsOpen=!!stage.querySelector('.call-tools')?.open;
       for(const selector of ['.voice-stage-header','.stage-participants','.stage-controls']){
         const prev=stage.querySelector(selector),next=candidate.querySelector(selector);
         if(prev&&next)prev.replaceWith(next);
       }
+      if(stage.querySelector('.call-tools'))stage.querySelector('.call-tools').open=toolsOpen;
       const previousGrid=stage.querySelector('.video-grid');
       const incomingGrid=candidate.querySelector('.video-grid');
       const desired=new Set();
@@ -1294,9 +1496,13 @@
         }else previousGrid.appendChild(incomingTile);
       }
       for(const tile of Array.from(previousGrid.children)){
-        if(!desired.has(tile.querySelector('video')?.id))tile.remove();
+        if(!desired.has(tile.querySelector('video')?.id)){releaseVideo(tile.querySelector('video'));tile.remove()}
       }
     }
+    $('#listenTogether').onclick=showJam;
+    $('#returnGrid').onclick=()=>{state.focusedVideo=null;applyVideoFocus()};
+    if(focusedControl)document.getElementById(focusedControl)?.focus({preventScroll:true});
+    updateCallClock();
     $('#muteVoice').onclick=toggleMute;
     $('#activateAudio').onclick=activateRemoteAudio;
     $('#reconnectVoice').onclick=reconnectVoice;
@@ -1310,16 +1516,30 @@
       // Fluxos de vídeo não devem reproduzir som: o áudio é controlado separadamente.
       video.muted=true;video.playsInline=true;video.setAttribute('playsinline','');
       if(video.srcObject!==stream)video.srcObject=stream;
-      const retry=video.closest('.video-tile')?.querySelector('[data-video-retry]');
+      const tile=video.closest('.video-tile');
+      const reveal=()=>{if(video.srcObject===stream&&!video.paused&&video.readyState>=2&&video.videoWidth){tile.classList.remove('awaiting-frame','playback-blocked');applyVideoFocus()}};
+      video.onloadeddata=reveal;video.onplaying=reveal;reveal();
+      const retry=tile?.querySelector('[data-video-retry]');
       // Tentar sem substituir o player, e oferecer um botão se o Safari bloquear.
       if(!video.paused&&!retry?.classList.contains('hidden'))retry.classList.add('hidden');
       if(video.paused)video.play().then(()=>{
         retry?.classList.add('hidden');
       }).catch(err=>{
+        if(!video.isConnected||video.srcObject!==stream)return;
         console.warn('etim: vídeo aguardando toque para reproduzir',err);
         retry?.classList.remove('hidden');
+        tile.classList.remove('awaiting-frame');tile.classList.add('playback-blocked');
       });
     };
+    for(const tile of $$('.video-tile',stage)){
+      const video=tile.querySelector('video');
+      if(!tile.querySelector('[data-focus-video]')){
+        const button=document.createElement('button');button.type='button';button.className='video-focus';
+        button.dataset.focusVideo=video.id;button.textContent='⛶';
+        button.setAttribute('aria-label','Ampliar '+tile.querySelector('.video-tile-label').textContent);tile.appendChild(button);
+      }
+    }
+    applyVideoFocus();
     attach($('#myCameraPreview'),state.camera);
     attach($('#myScreenPreview'),state.screen);
     for(const [id,info] of remoteScreens)attach(document.getElementById('remote-'+id),info.stream);
@@ -1336,10 +1556,17 @@
   function setupEvents(){
     $('#textChannels').addEventListener('click',e=>{const btn=e.target.closest('[data-text]');if(btn)switchChannel(btn.dataset.text)});
     $('#voiceChannels').addEventListener('click',e=>{const watch=e.target.closest('[data-watch]');if(watch){openMedia();return}const btn=e.target.closest('[data-voice]');if(btn)joinVoice(btn.dataset.voice)});
+    $('#modalOverlay').addEventListener('keydown',e=>{
+      if(e.key!=='Tab')return;
+      const focusable=$$('button:not([disabled]),input:not([disabled]),a[href],summary', $('#modalOverlay')).filter(el=>el.getClientRects().length);
+      const first=focusable[0],last=focusable.at(-1);
+      if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus()}
+      else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus()}
+    });
     $('#backToChat').onclick=backToChat;
     $('#voiceStage').addEventListener('click',e=>{
       const btn=e.target.closest('[data-video-retry]');
-      if(!btn)return;
+      if(!btn){const tile=e.target.closest('.video-tile');if(tile){state.focusedVideo=tile.querySelector('video').id;applyVideoFocus()}return;}
       const video=btn.closest('.video-tile')?.querySelector('video');
       if(!video)return;
       video.muted=true;
@@ -1353,7 +1580,10 @@
     $('#demoNotice').classList.remove('hidden');$('#connectBtn').onclick=showHowTo;$('#closeNotice').onclick=()=>{state.noticeClosed=true;$('#demoNotice').classList.add('hidden')};
     $('#inviteBtn').onclick=showInvite;$('#settingsBtn').onclick=showSettings;$('#railHelp').onclick=showAbout;
     $('#addSpaceBtn').onclick=()=>debounceToast('Nesta versão, cada grupo tem um espaço. ✦');
-    $('#addChannel').onclick=()=>debounceToast('Os cinco canais já vêm configurados na versão 1.');
+    $('#addChannel').onclick=()=>showChannelEditor('text');
+    $('#addVoiceChannel').onclick=()=>showChannelEditor('voice');
+    $('#workspaceSettings').onclick=showGroupEditor;
+    $('#sidebar').addEventListener('click',e=>{const button=e.target.closest('[data-edit-channel]');if(button)showChannelEditor(button.dataset.kind,button.dataset.editChannel)});
     $('#leaveVoiceSmall').onclick=leaveVoice;
     $('#attachBtn').onclick=()=>debounceToast('Envio de arquivos ficará para a próxima versão.');
     const emojis=['😎','😂','❤️','✨','🎮','👀','🔥','🚀','🎉','💜','😭','🤝','🥳','💀','🤖','🍕','🫶','😴','⭐','🙌','👏'];
@@ -1366,6 +1596,7 @@
     $('#mobileMenu').onclick=()=>toggleMobile('#sidebar');$('#memberToggle').onclick=()=>toggleMobile('#membersPanel');$('#closeMembers').onclick=closeMobile;$('#mobileScrim').onclick=closeMobile;
     window.addEventListener('keydown',e=>{if(e.key==='Escape'){closeMobile();$('#emojiPicker').classList.add('hidden');if(!$('#modalClose').classList.contains('hidden'))closeModal()}});
     window.addEventListener('pagehide',()=>{
+      stopCallClock();
       // Em especial no iOS/Safari: avisar a sala mesmo se a pagina for fechada
       // sem clicar em Sair. O envio e best effort; Presence corrige o restante.
       if(state.voiceRoom){
@@ -1382,9 +1613,12 @@
       state.screen?.getTracks().forEach(t=>t.stop());
       state.camera?.getTracks().forEach(t=>t.stop());
       state.microphone=null;state.screen=null;state.camera=null;
+      for(const id of [...state.audioMonitors.keys()])stopMonitor(id);
+      renderVoiceStage();
     });
     // Safari pode suspender a decodificação ao alternar entre aplicativos no celular.
     document.addEventListener('visibilitychange',()=>{
+      if(!document.hidden&&state.live)fetchSharedSettings();
       if(!document.hidden&&state.voiceRoom){
         renderVoiceStage();
         for(const video of document.querySelectorAll('#voiceStage video')){
@@ -1394,7 +1628,7 @@
     });
     window.addEventListener('pageshow',event=>{
       if(event.persisted&&state.live){
-        updatePresence();renderAll();
+        updatePresence();fetchSharedSettings();renderAll();
       }
     });
   }

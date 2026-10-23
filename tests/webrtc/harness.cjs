@@ -12,6 +12,7 @@ const hook = `window.audit = { state, joinVoice, leaveVoice, startCamera, stopCa
   startScreen, stopScreen, toggleMute, ensurePeer, offerPeer, queueSignal,
   handleSignal, handleVoicePresenceEvent, syncPeers, refreshPresence, readVoiceStatistics, recoverPeer,
   repairMicrophone, requestMediaRenegotiation, renderVoiceStage, openMedia,
+  fetchSharedSettings, showJam, showChannelEditor, showGroupEditor, renderChannels, validateJamUrl, formatCallDuration, backToChat,
   snapshot: async () => ({room:state.voiceRoom, session:state.voiceSession,
     camera:state.camera?.getVideoTracks().map(t=>({id:t.id,ready:t.readyState})),
     screen:state.screen?.getVideoTracks().map(t=>({id:t.id,ready:t.readyState})),
@@ -86,7 +87,8 @@ async function createLab(t, ids = ['a', 'b']) {
         const ctx=canvas.getContext('2d');let frame=0;
         const draw=()=>{ctx.fillStyle='#d32f2f';ctx.fillRect(0,0,640,360);ctx.fillStyle='white';ctx.font='40px sans-serif';ctx.fillText('SCREEN '+frame++,40,100)};
         draw();const timer=setInterval(draw,50);const stream=canvas.captureStream(20);
-        stream.getVideoTracks()[0].addEventListener('ended',()=>clearInterval(timer));return stream;
+        const track=stream.getVideoTracks()[0],stop=track.stop.bind(track);
+        track.stop=()=>{clearInterval(timer);stop()};track.addEventListener('ended',()=>clearInterval(timer));return stream;
       };
     });
     await page.exposeBinding('auditTrack',async(_,record)=>{records.set(id,record);await broadcastPresence();return 'ok'});

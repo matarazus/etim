@@ -80,3 +80,53 @@
 
 /* Painel de diagnóstico WebRTC. Não exibe tokens, IPs ou identificadores de conta. */
 .voice-report{max-height:46vh;overflow:auto;white-space:pre-wrap;overflow-wrap:anywhere;text-align:left;background:#171821;border:1px solid #44415c;border-radius:10px;padding:12px;font-size:11px;line-height:1.65;color:#e5e4f2;margin:12px 0}
+
+/* Chamada: proporção original, destaque e miniaturas sem recriar players. */
+.video-tile.awaiting-frame{display:none}
+.video-tile.playback-blocked video{visibility:hidden}
+.video-tile.playback-blocked{min-height:100px}
+.media-view .video-tile.is-camera video{object-fit:contain}
+.video-focus{position:absolute;right:8px;top:8px;border:1px solid #655c83;border-radius:8px;background:#242336dc;color:#eee8ff;padding:7px 10px;z-index:3;font-size:18px}
+.video-focus[aria-pressed=true]{background:#62549d}
+.video-tile video{cursor:pointer}
+.media-view .video-grid.has-focus{grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr))}
+.media-view .has-focus .video-tile{min-height:100px}
+.media-view .has-focus .video-tile video{max-height:140px}
+.media-view .has-focus .video-tile.is-focused{grid-column:1/-1;grid-row:1;min-height:220px}
+.media-view .has-focus .is-focused video{height:min(56dvh,640px);max-height:none;aspect-ratio:auto;object-fit:contain}
+#returnGrid{align-self:flex-start;margin-top:8px}
+[data-call-duration]{font-variant-numeric:tabular-nums;white-space:nowrap}
+button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid #b6a8ff;outline-offset:3px}
+@media(max-width:690px){
+  .media-view .video-grid{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .media-view .video-grid>.video-tile:only-child{grid-column:1/-1}
+  .media-view .video-tile{min-height:100px}
+  .media-view .video-grid.has-focus{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .media-view .has-focus .is-focused video{height:42dvh;min-height:200px}
+  .video-tile-label{font-size:10px;max-width:calc(100% - 12px);left:6px;bottom:6px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;padding:4px 6px}
+  .stage-controls button{min-height:40px}
+}
+
+/* Edição compartilhada e Jam: mesmos tons e componentes do etim. */
+.channel-row{display:flex;align-items:center;gap:2px;min-width:0}
+.channel-row .channel-button{flex:1;min-width:0}
+.channel-row .channel-button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.channel-options{flex-shrink:0;width:32px;min-height:36px;border:0;border-radius:7px;background:transparent;color:#b1a9c9;font-size:20px}
+.channel-options:hover{background:#393448;color:#fff}
+.channel-description{display:block;padding:0 12px 6px 35px;font-size:10px;color:#9d97af;overflow-wrap:anywhere}
+.workspace-title{min-width:0}
+#groupDisplayName{max-width:155px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#workspaceSettings{color:#c3b9e3;flex-shrink:0;font-size:20px}
+#groupDescription{overflow-wrap:anywhere}
+.call-tools{width:100%;font-size:11px;color:#c8bedf}
+.call-tools summary{cursor:pointer;padding:7px 2px;width:fit-content}
+.call-tools>div{display:flex;gap:7px;flex-wrap:wrap;padding:6px 0}
+.stage-controls .jam-active{border-color:#738e81;color:#c6e8d2}
+.external-action{display:block;text-align:center;text-decoration:none}
+.jam-instructions{margin-top:20px;font-size:13px;color:#c9bfdc}
+.jam-instructions summary{cursor:pointer;padding:8px 0}
+.jam-instructions p{margin:10px 0}
+.modal .danger{background:#693a4b;border-color:#92556c;color:#ffdae4}
+button:disabled{opacity:.55;cursor:not-allowed}
+
+.banner-duration{display:block;margin-top:3px;color:#b6accd;font-size:10px}

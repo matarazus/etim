@@ -1,6 +1,8 @@
-# Testes da auditoria WebRTC
+# Testes do etim
 
-Estes testes descrevem contratos de funcionamento correto. **A versão auditada falha; um resultado vermelho é evidência para a correção, não uma suíte aprovada.** Nenhum teste é marcado como falha esperada para esconder defeitos.
+Estes testes descrevem contratos de funcionamento correto. A auditoria original detectou falhas que foram corrigidas na main; os arquivos de evidência históricos continuam em `docs/`. Nenhum teste é marcado como falha esperada para esconder defeitos.
+
+A atualização de chamadas, canais e Jam acrescenta `features.test.cjs` e `database.test.cjs`. A migration real é executada em PostgreSQL embarcado (PGlite), também usado por dois clientes de interface com transporte Supabase simulado. Inclui autorização de membros/não membros, proteção contra exclusão, preservação de mensagens, URLs, sincronização, foco responsivo e contador. Consulte [ATUALIZACAO_ETIM.md](../../docs/ATUALIZACAO_ETIM.md) para implantação e limites.
 
 A branch de correção agora passa em 29 dos 35 testes localmente, com seis testes RTP bloqueados pelo ambiente e nenhum teste falhando. Os resultados e limites estão em [CORRECOES_WEBRTC.md](../../docs/CORRECOES_WEBRTC.md). O workflow do GitHub exige RTP sem skips para validar a liberação.
 
@@ -34,7 +36,7 @@ REQUIRE_WEBRTC_MEDIA=1 npm test
 Uma execução com skips de RTP não autoriza liberação. Cada teste guarda um JSON próprio em `results/`: versão do navegador, commit, SDP resumido, transceivers, contadores RTP, sinais e erros. O runner mantém código de saída diferente de zero se qualquer contrato falhar. Para relatório TAP:
 
 ```sh
-node --test --test-reporter=tap --test-concurrency=1 audit.test.cjs turn.test.cjs > results/run.tap 2>&1
+node --test --test-reporter=tap --test-concurrency=1 audit.test.cjs turn.test.cjs features.test.cjs database.test.cjs > results/run.tap 2>&1
 ```
 
 Crie `results/` antes de redirecionar, caso ainda não exista. O diretório é ignorado pelo Git; a evidência da auditoria está em `../../docs/`.
@@ -55,6 +57,6 @@ Crie `results/` antes de redirecionar, caso ainda não exista. O diretório é i
 
 Inclui duas ordens de entrada, três participantes, câmera durante chamada, câmera + tela simultâneas, saída/reentrada, permissões atrasadas, mute durante recuperação, sinal atrasado de sessão anterior, ordem de inicialização TURN e perda de resposta de renegociação.
 
-Se o navegador não fornecer candidatos ICE host, os seis testes que precisam de RTP são explicitamente ignorados e informam a limitação. Os testes de SDP e ciclo de vida continuam executando, inclusive suas asserções que falham. A ausência de pacotes nesse ambiente **não é atribuída ao aplicativo**.
+Se o navegador não fornecer candidatos ICE host, os sete testes que precisam de RTP (incluindo os ciclos de câmera/tela) são explicitamente ignorados e informam a limitação. Os testes de SDP e ciclo de vida continuam executando, inclusive suas asserções que falham. A ausência de pacotes nesse ambiente **não é atribuída ao aplicativo**.
 
-Não existe Safari real neste Linux. Playwright WebKit também não estava instalado; mesmo instalado, não substituiria Safari/iOS com dispositivos reais. A matriz de validação complementar está no relatório. Os testes de RTP foram criados, mas sua aprovação ainda está pendente.
+Não existe Safari real neste Linux. Playwright WebKit também não estava instalado; mesmo instalado, não substituiria Safari/iOS com dispositivos reais. A matriz de validação complementar está no relatório. A aprovação da suíte anterior está registrada acima; cada atualização deve passar novamente com RTP obrigatório no GitHub Actions.
