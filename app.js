@@ -77,6 +77,7 @@
     demoChat:safeJSON('etim_demo_chat',safeJSON('nexo_demo_chat',{})), profile:safeJSON('etim_demo_profile',safeJSON('nexo_demo_profile',{nickname:'Você',color:'#897df1',photo:''})),
     liveChat:{}, search:'', muted:false, voiceRoom:null, microphone:null, screen:null, camera:null, peers:new Map(), remoteVideos:new Map(), remoteCameras:new Map(),
     noticeClosed:false, loading:false, audioPromptAt:0,
+    focusedVideo:null,callStartedAt:null,callTimer:null,presenceTask:Promise.resolve(),
     voiceSession:null,voiceJoinRequest:null,voiceInitialization:null,voiceReady:false,voiceWatchdog:null,signalTasks:new Map(),earlyIce:new Map(),
     retiredPeerGenerations:new Set(),cameraRequest:null,screenRequest:null,
     voiceDepartures:new Map(),voicePresenceHeartbeat:0,
@@ -164,6 +165,44 @@
         }
       },110);
     }catch(err){console.warn('Indicador de fala:',err)}
+  }
+  function formatCallDuration(start,now=Date.now()){
+    const seconds=Math.max(0,Math.floor((now-start)/1000));
+    return [Math.floor(seconds/3600),Math.floor(seconds/60)%60,seconds%60].map(v=>String(v).padStart(2,'0')).join(':');
+  }
+  function updateCallClock(){
+    const label=state.callStartedAt===null?'':'Conectado há '+formatCallDuration(state.callStartedAt);
+    $$('[data-call-duration]').forEach(el=>el.textContent=label);
+  }
+  function startCallClock(){
+    clearInterval(state.callTimer);state.callStartedAt=Date.now();
+    state.callTimer=setInterval(updateCallClock,1000);updateCallClock();
+  }
+  function stopCallClock(){
+    clearInterval(state.callTimer);state.callTimer=null;state.callStartedAt=null;state.focusedVideo=null;
+    clearInterval(state.speechTimer);state.speechTimer=null;
+  }
+  function remoteVideoActive(id,info,kind){
+    const person=state.presence.find(p=>p.id===id),peer=state.peers.get(id);
+    return !!(state.voiceRoom&&peer&&person?.voiceRoom===state.voiceRoom&&
+      person.voiceSession===peer.remoteSession&&person[kind==='cam'?'isCameraOn':'isStreaming']===true&&
+      info.active&&info.track.readyState==='live'&&!info.track.muted);
+  }
+  function releaseVideo(video){
+    if(!video)return;
+    video.onloadeddata=null;video.onplaying=null;video.pause();video.srcObject=null;
+  }
+  function applyVideoFocus(){
+    const grid=$('#voiceStage .video-grid');if(!grid)return;
+    const tiles=[...grid.children],available=tiles.filter(t=>!t.classList.contains('awaiting-frame'));
+    if(!available.some(t=>t.querySelector('video')?.id===state.focusedVideo))state.focusedVideo=null;
+    grid.classList.toggle('has-focus',!!state.focusedVideo);
+    for(const tile of tiles){
+      const focused=tile.querySelector('video')?.id===state.focusedVideo;
+      tile.classList.toggle('is-focused',focused);
+      const button=tile.querySelector('[data-focus-video]');if(button)button.setAttribute('aria-pressed',String(focused));
+    }
+    $('#returnGrid')?.classList.toggle('hidden',!state.focusedVideo);
   }
   function stopMonitor(id){const m=state.audioMonitors.get(id);if(m){m.source.disconnect();state.audioMonitors.delete(id)}state.speaking.delete(id)}
   function renderChannels(){
@@ -452,7 +491,11 @@
       payload:{kind:'leave',from:myId(),room,session}
     })).catch(err=>console.warn('Saida da sala nao anunciada:',err));
   }
-  async function updatePresence(){if(!state.channel||!state.user)return;try{await state.channel.track({id:myId(),nickname:state.user.nickname,color:state.user.color,voiceRoom:state.voiceRoom,isMuted:state.muted,isStreaming:!!state.screen,isCameraOn:!!state.camera,photo:safePhoto(state.profile.photo),voiceSession:state.voiceSession,at:new Date().toISOString()})}catch(e){console.warn('Presence',e)}}
+  async function updatePresence(){
+    state.presenceTask=state.presenceTask.catch(()=>{}).then(async()=>{
+    if(!state.channel||!state.user)return;try{const result=await state.channel.track({id:myId(),nickname:state.user.nickname,color:state.user.color,voiceRoom:state.voiceRoom,isMuted:state.muted,isStreaming:!!state.screen,isCameraOn:!!state.camera,photo:safePhoto(state.profile.photo),voiceSession:state.voiceSession,at:new Date().toISOString()});if(result==='error'||result==='timed out')console.warn('Presence não confirmada:',result)}catch(e){console.warn('Presence',e)}
+    });return state.presenceTask;
+  }
 
   // WebRTC P2P: quem tem ID menor inicia a oferta. ICE precoce é guardado até a descrição remota.
   // Cada renegociação recebe um ID próprio; sinais antigos de tentativas anteriores são ignorados.
@@ -518,7 +561,7 @@
     if(state.voiceJoinRequest!==joinRequest)return;
     // Criar/retomar o AudioContext no clique ajuda o Safari a reproduzir os sons e a voz.
     voiceCue('join');
-    state.voiceRoom=room;state.voiceSession=newVoiceId();state.muted=true;
+    state.voiceRoom=room;state.voiceSession=newVoiceId();state.muted=true;startCallClock();
     const joiningSession=state.voiceSession;
     state.voiceReady=false;
     const initialization={session:joiningSession};
@@ -554,7 +597,7 @@
   async function leaveVoice(silent=false,joinRequest=null){
     state.voiceJoinRequest=joinRequest;
     if(!state.voiceRoom)return;
-    const oldRoom=state.voiceRoom,oldSession=state.voiceSession;
+    const oldRoom=state.voiceRoom,oldSession=state.voiceSession;stopCallClock();
     if(silent!==true)voiceCue('leave');
     clearInterval(state.voiceWatchdog);state.voiceWatchdog=null;
     // Anuncia a saida antes do Presence se atualizar; protege contra snapshots atrasados.
@@ -587,7 +630,11 @@
       if(peer.audio){peer.audio.pause();peer.audio.srcObject=null;peer.audio.remove()}
       peer.pc.close();state.peers.delete(id);
     }
-    state.remoteVideos.delete(id);state.remoteCameras.delete(id);stopMonitor(id);
+    for(const map of [state.remoteVideos,state.remoteCameras]){
+      const info=map.get(id);if(info){info.track.onmute=null;info.track.onunmute=null;info.track.onended=null}
+      map.delete(id);
+    }
+    stopMonitor(id);
     state.videoHealth.delete('cam:'+id);state.videoHealth.delete('screen:'+id);
   }
   function syncPeers(){
@@ -686,16 +733,16 @@
         (isScreen?state.remoteVideos:state.remoteCameras).set(id,info);
         const prefix=isScreen?'screen:':'cam:';
         track.onunmute=()=>{
-          if(state.peers.get(id)!==peer)return;
+          if(state.peers.get(id)!==peer||(isScreen?state.remoteVideos:state.remoteCameras).get(id)!==info)return;
           info.active=true;state.videoHealth.delete(prefix+id);
           renderVoiceStage();
         };
         track.onmute=()=>{
-          if(state.peers.get(id)!==peer)return;
+          if(state.peers.get(id)!==peer||(isScreen?state.remoteVideos:state.remoteCameras).get(id)!==info)return;
           info.active=false;renderVoiceStage();
         };
         track.onended=()=>{
-          if(state.peers.get(id)!==peer)return;
+          if(state.peers.get(id)!==peer||(isScreen?state.remoteVideos:state.remoteCameras).get(id)!==info)return;
           info.active=false;renderVoiceStage();
         };
         renderVoiceStage();
@@ -919,7 +966,7 @@
     try{
       for(const [kind,map] of [['cam',state.remoteCameras],['screen',state.remoteVideos]]){
         for(const [id,info] of map){
-          if(!info.active||!state.peers.has(id))continue;
+          if(!remoteVideoActive(id,info,kind))continue;
           const peer=state.peers.get(id);
           const key=kind+':'+id, now=Date.now();
           const current=state.videoHealth.get(key)||{lastFrames:-1,lastProgress:now,status:'Aguardando imagem'};
@@ -1217,9 +1264,10 @@
     state.cameraRequest=null;
     if(!state.camera)return;
     const old=state.camera;state.camera=null;
+    renderVoiceStage();const presence=updatePresence();
     await refreshMediaConnections('camera',null);
     old.getTracks().forEach(t=>{t.onended=null;t.stop()});
-    await updatePresence();renderVoiceStage();
+    await presence;renderVoiceStage();
   }
   async function startScreen(){
     if(!state.voiceRoom){debounceToast('Entre em uma sala de voz antes de transmitir.',true);return}
@@ -1241,14 +1289,15 @@
     state.screenRequest=null;
     if(!state.screen)return;
     const old=state.screen;state.screen=null;
+    renderVoiceStage();const presence=updatePresence();
     await refreshMediaConnections('screen',null);
-    old.getTracks().forEach(t=>{t.onended=null;t.stop()});await updatePresence();renderVoiceStage();
+    old.getTracks().forEach(t=>{t.onended=null;t.stop()});await presence;renderVoiceStage();
   }
   // Mantem os players montados. Recriar <video> em toda atualizacao do Presence
   // interrompia streams WebRTC e podia deixar tela preta no Safari/iPhone.
   function renderVoiceStage(){
     const stage=$('#voiceStage'),connected=!!state.voiceRoom;
-    stage.classList.toggle('hidden',!connected);$('#voiceTray').classList.toggle('hidden',!connected);renderMediaView();if(!connected)return;
+    stage.classList.toggle('hidden',!connected);$('#voiceTray').classList.toggle('hidden',!connected);renderMediaView();if(!connected){$$('video',stage).forEach(releaseVideo);stage.replaceChildren();delete stage.dataset.room;return}
     $('#voiceTrayRoom').textContent=voiceName(state.voiceRoom);
     const me=state.user||state.profile,mePhoto=ownPhoto(myId());
     $('#voiceTrayAvatar').style.background=me.color||'#897df1';
@@ -1256,22 +1305,22 @@
     $('#voiceTrayAvatar').innerHTML=mePhoto?`<img alt="" src="${esc(mePhoto)}" />`:esc(initials(me.nickname));
     const people=state.live?state.presence.filter(p=>p.voiceRoom===state.voiceRoom):[];
     const participants=state.live?people:[{id:myId(),nickname:state.profile.nickname,color:state.profile.color,isMuted:state.muted,isCameraOn:!!state.camera}];
-    const remoteScreens=[...state.remoteVideos.entries()].filter(([id,s])=>s.active&&state.peers.has(id));
-    const remoteCameras=[...state.remoteCameras.entries()].filter(([id,s])=>s.active&&state.peers.has(id));
-    const cameraTiles=(state.camera?`<div class="video-tile is-camera"><video id="myCameraPreview" autoplay muted playsinline></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-tile-label">Sua câmera · ${state.live?'ao vivo':'prévia local'}</span></div>`:'')+
-      remoteCameras.map(([id])=>`<div class="video-tile is-camera is-remote-camera"><video autoplay muted playsinline id="cam-${esc(id)}"></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-health hidden" data-video-health></span><span class="video-tile-label">Câmera de ${esc(state.memberMap.get(id)?.nickname||'Amigo')}</span></div>`).join('');
-    const screenTiles=(state.screen?`<div class="video-tile is-screen"><video id="myScreenPreview" autoplay muted playsinline></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-tile-label">Sua tela · ${state.live?'transmitindo':'prévia local'}</span></div>`:'')+
-      remoteScreens.map(([id])=>`<div class="video-tile is-screen"><video autoplay muted playsinline id="remote-${esc(id)}"></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-health hidden" data-video-health></span><span class="video-tile-label">Tela de ${esc(state.memberMap.get(id)?.nickname||'Amigo')}</span></div>`).join('');
-    const nextMarkup=`<div class="voice-stage-header"><div class="stage-icon">${icon('radio')}</div><div><h3>Você está na ${esc(voiceName(state.voiceRoom))}</h3><p>${state.live?'Áudio, câmera e tela em WebRTC · experimental':'Modo demonstração · prévia local de microfone, câmera e tela'}</p></div><span class="mode-pill ${state.live?'live':''}">${state.live?'AO VIVO':'DEMO'}</span></div>
+    const remoteScreens=[...state.remoteVideos.entries()].filter(([id,s])=>remoteVideoActive(id,s,'screen'));
+    const remoteCameras=[...state.remoteCameras.entries()].filter(([id,s])=>remoteVideoActive(id,s,'cam'));
+    const cameraTiles=(state.camera?`<div class="video-tile awaiting-frame is-camera"><video id="myCameraPreview" autoplay muted playsinline></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-tile-label">Sua câmera · ${state.live?'ao vivo':'prévia local'}</span></div>`:'')+
+      remoteCameras.map(([id])=>`<div class="video-tile awaiting-frame is-camera is-remote-camera"><video autoplay muted playsinline id="cam-${esc(id)}"></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-health hidden" data-video-health></span><span class="video-tile-label">Câmera de ${esc(state.memberMap.get(id)?.nickname||'Amigo')}</span></div>`).join('');
+    const screenTiles=(state.screen?`<div class="video-tile awaiting-frame is-screen"><video id="myScreenPreview" autoplay muted playsinline></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-tile-label">Sua tela · ${state.live?'transmitindo':'prévia local'}</span></div>`:'')+
+      remoteScreens.map(([id])=>`<div class="video-tile awaiting-frame is-screen"><video autoplay muted playsinline id="remote-${esc(id)}"></video><button type="button" class="video-retry hidden" data-video-retry>Toque para assistir</button><span class="video-health hidden" data-video-health></span><span class="video-tile-label">Tela de ${esc(state.memberMap.get(id)?.nickname||'Amigo')}</span></div>`).join('');
+    const nextMarkup=`<div class="voice-stage-header"><div class="stage-icon">${icon('radio')}</div><div><h3>Você está na ${esc(voiceName(state.voiceRoom))}</h3><p data-call-duration></p></div><span class="mode-pill ${state.live?'live':''}">${state.live?'AO VIVO':'DEMO'}</span></div>
       <div class="stage-participants">${participants.map(p=>`<div class="stage-person ${isTalking(p.id)?'is-speaking':''}" data-speaker-id="${esc(p.id)}">${avatar(p.nickname,p.color,'voice-participant-avatar',ownPhoto(p.id))}<span class="voice-person-name">${esc(p.nickname||'Você')}${p.id===myId()?' (você)':''}</span><span class="voice-person-status" title="${p.isMuted?'Microfone silenciado':'Microfone ativo'}">${icon(p.isMuted?'mic-off':'mic')}</span>${p.isCameraOn?`<span title="Câmera ligada" class="voice-person-status">${icon('video')}</span>`:''}</div>`).join('')||'<span style="color:#9e98b9">Conectando...</span>'}</div>
       <div class="stage-controls"><button id="muteVoice" class="${state.muted?'negative':''}">${icon(state.muted?'mic-off':'mic')}${state.muted?'Ativar mic':'Silenciar'}</button><button id="activateAudio">${icon('volume-2')}Ativar som</button><button id="reconnectVoice">${icon('radio')}Reconectar</button><button id="diagnoseVoice">${icon('activity')}Diagnóstico</button><button id="voiceSounds">${icon('volume-2')}Sons ${state.voiceSounds?'ligados':'desligados'}</button><button id="toggleCamera" class="${state.camera?'camera-on':''}">${icon(state.camera?'video-off':'video')}${state.camera?'Desligar câmera':'Ligar câmera'}</button><button id="shareScreen" ${!state.screen&&!navigator.mediaDevices?.getDisplayMedia?'disabled title="Neste navegador, você pode assistir à tela compartilhada pelos amigos"':''}>${icon(state.screen?'monitor-off':'monitor-up')}${state.screen?'Parar transmissão':'Compartilhar tela'}</button><button class="danger" id="leaveVoice">${icon('phone-off')}Sair da sala</button></div>
-      <div class="video-grid">${cameraTiles}${screenTiles}</div>`;
+      <button id="returnGrid" class="media-back hidden" type="button">Voltar ao grid</button><div class="video-grid">${cameraTiles}${screenTiles}</div>`;
     // Atualiza somente cabeçalho, pessoas e controles. A grade e os elementos
     // de vídeo continuam vivos, sem recriar srcObject a cada heartbeat.
     const candidate=document.createElement('div');
     candidate.innerHTML=nextMarkup;
     if(stage.dataset.room!==state.voiceRoom||!stage.querySelector('.video-grid')){
-      stage.innerHTML=nextMarkup;
+      $$('video',stage).forEach(releaseVideo);stage.innerHTML=nextMarkup;
       stage.dataset.room=state.voiceRoom;
     }else{
       for(const selector of ['.voice-stage-header','.stage-participants','.stage-controls']){
@@ -1294,9 +1343,11 @@
         }else previousGrid.appendChild(incomingTile);
       }
       for(const tile of Array.from(previousGrid.children)){
-        if(!desired.has(tile.querySelector('video')?.id))tile.remove();
+        if(!desired.has(tile.querySelector('video')?.id)){releaseVideo(tile.querySelector('video'));tile.remove()}
       }
     }
+    $('#returnGrid').onclick=()=>{state.focusedVideo=null;applyVideoFocus()};
+    updateCallClock();
     $('#muteVoice').onclick=toggleMute;
     $('#activateAudio').onclick=activateRemoteAudio;
     $('#reconnectVoice').onclick=reconnectVoice;
@@ -1310,7 +1361,10 @@
       // Fluxos de vídeo não devem reproduzir som: o áudio é controlado separadamente.
       video.muted=true;video.playsInline=true;video.setAttribute('playsinline','');
       if(video.srcObject!==stream)video.srcObject=stream;
-      const retry=video.closest('.video-tile')?.querySelector('[data-video-retry]');
+      const tile=video.closest('.video-tile');
+      const reveal=()=>{if(video.srcObject===stream&&video.readyState>=2&&video.videoWidth){tile.classList.remove('awaiting-frame','playback-blocked');applyVideoFocus()}};
+      video.onloadeddata=reveal;video.onplaying=reveal;reveal();
+      const retry=tile?.querySelector('[data-video-retry]');
       // Tentar sem substituir o player, e oferecer um botão se o Safari bloquear.
       if(!video.paused&&!retry?.classList.contains('hidden'))retry.classList.add('hidden');
       if(video.paused)video.play().then(()=>{
@@ -1318,8 +1372,18 @@
       }).catch(err=>{
         console.warn('etim: vídeo aguardando toque para reproduzir',err);
         retry?.classList.remove('hidden');
+        tile.classList.remove('awaiting-frame');tile.classList.add('playback-blocked');
       });
     };
+    for(const tile of $$('.video-tile',stage)){
+      const video=tile.querySelector('video');
+      if(!tile.querySelector('[data-focus-video]')){
+        const button=document.createElement('button');button.type='button';button.className='video-focus';
+        button.dataset.focusVideo=video.id;button.textContent='⛶';
+        button.setAttribute('aria-label','Ampliar '+tile.querySelector('.video-tile-label').textContent);tile.appendChild(button);
+      }
+    }
+    applyVideoFocus();
     attach($('#myCameraPreview'),state.camera);
     attach($('#myScreenPreview'),state.screen);
     for(const [id,info] of remoteScreens)attach(document.getElementById('remote-'+id),info.stream);
@@ -1339,7 +1403,7 @@
     $('#backToChat').onclick=backToChat;
     $('#voiceStage').addEventListener('click',e=>{
       const btn=e.target.closest('[data-video-retry]');
-      if(!btn)return;
+      if(!btn){const tile=e.target.closest('.video-tile');if(tile){state.focusedVideo=tile.querySelector('video').id;applyVideoFocus()}return;}
       const video=btn.closest('.video-tile')?.querySelector('video');
       if(!video)return;
       video.muted=true;
@@ -1366,6 +1430,7 @@
     $('#mobileMenu').onclick=()=>toggleMobile('#sidebar');$('#memberToggle').onclick=()=>toggleMobile('#membersPanel');$('#closeMembers').onclick=closeMobile;$('#mobileScrim').onclick=closeMobile;
     window.addEventListener('keydown',e=>{if(e.key==='Escape'){closeMobile();$('#emojiPicker').classList.add('hidden');if(!$('#modalClose').classList.contains('hidden'))closeModal()}});
     window.addEventListener('pagehide',()=>{
+      stopCallClock();
       // Em especial no iOS/Safari: avisar a sala mesmo se a pagina for fechada
       // sem clicar em Sair. O envio e best effort; Presence corrige o restante.
       if(state.voiceRoom){
@@ -1382,6 +1447,8 @@
       state.screen?.getTracks().forEach(t=>t.stop());
       state.camera?.getTracks().forEach(t=>t.stop());
       state.microphone=null;state.screen=null;state.camera=null;
+      for(const id of [...state.audioMonitors.keys()])stopMonitor(id);
+      renderVoiceStage();
     });
     // Safari pode suspender a decodificação ao alternar entre aplicativos no celular.
     document.addEventListener('visibilitychange',()=>{
