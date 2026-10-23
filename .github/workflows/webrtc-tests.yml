@@ -1,0 +1,38 @@
+name: WebRTC regression tests
+
+on:
+  push:
+    branches: [main, fix/webrtc-negotiation]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  chromium:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: tests/webrtc
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: tests/webrtc/package-lock.json
+      - run: npm ci
+      - run: npx playwright install --with-deps chromium
+      - name: Run native WebRTC tests including RTP
+        run: npm test
+        env:
+          REQUIRE_WEBRTC_MEDIA: '1'
+      - name: Save per-participant diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: webrtc-diagnostics
+          path: tests/webrtc/results/
+          if-no-files-found: ignore

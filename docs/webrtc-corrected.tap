@@ -1,0 +1,222 @@
+TAP version 13
+# Subtest: two-way audio join a-b
+ok 1 - two-way audio join a-b # SKIP ENVIRONMENT: no host ICE candidates; installed Chromium disables non-proxied UDP. RTP was NOT validated.
+  ---
+  duration_ms: 1936.798138
+  type: 'test'
+  ...
+# Subtest: two-way audio join b-a
+ok 2 - two-way audio join b-a # SKIP ENVIRONMENT: no host ICE candidates; installed Chromium disables non-proxied UDP. RTP was NOT validated.
+  ---
+  duration_ms: 2000.121059
+  type: 'test'
+  ...
+# Subtest: answerer binds exactly three sendrecv transceivers
+ok 3 - answerer binds exactly three sendrecv transceivers
+  ---
+  duration_ms: 2199.283934
+  type: 'test'
+  ...
+# Subtest: camera started by answerer delivers decoded frames
+ok 4 - camera started by answerer delivers decoded frames # SKIP ENVIRONMENT: no host ICE candidates; installed Chromium disables non-proxied UDP. RTP was NOT validated.
+  ---
+  duration_ms: 1893.761816
+  type: 'test'
+  ...
+# Subtest: offerer camera and screen have distinct correctly mapped receivers
+ok 5 - offerer camera and screen have distinct correctly mapped receivers # SKIP ENVIRONMENT: no host ICE candidates; installed Chromium disables non-proxied UDP. RTP was NOT validated.
+  ---
+  duration_ms: 1823.581873
+  type: 'test'
+  ...
+# Subtest: three participants receive audio from both other participants
+ok 6 - three participants receive audio from both other participants # SKIP ENVIRONMENT: no host ICE candidates; installed Chromium disables non-proxied UDP. RTP was NOT validated.
+  ---
+  duration_ms: 2192.577138
+  type: 'test'
+  ...
+# Subtest: normal leave stops local media and removes remote peer
+ok 7 - normal leave stops local media and removes remote peer
+  ---
+  duration_ms: 2162.564865
+  type: 'test'
+  ...
+# Subtest: leave and rejoin establishes a new session and negotiated peer
+ok 8 - leave and rejoin establishes a new session and negotiated peer
+  ---
+  duration_ms: 2285.744732
+  type: 'test'
+  ...
+# Subtest: screen permission resolving after leave must stop capture
+ok 9 - screen permission resolving after leave must stop capture
+  ---
+  duration_ms: 1346.984066
+  type: 'test'
+  ...
+# Subtest: camera permission from old room must not publish in new room
+ok 10 - camera permission from old room must not publish in new room
+  ---
+  duration_ms: 1487.776935
+  type: 'test'
+  ...
+# Subtest: queued signal must be revalidated after room session changes
+ok 11 - queued signal must be revalidated after room session changes
+  ---
+  duration_ms: 1395.24658
+  type: 'test'
+  ...
+# Subtest: presence must not create peer connections before TURN resolves
+ok 12 - presence must not create peer connections before TURN resolves
+  ---
+  duration_ms: 2398.785079
+  type: 'test'
+  ...
+# Subtest: lost renegotiation answer must not permanently wedge connected peer
+ok 13 - lost renegotiation answer must not permanently wedge connected peer # SKIP ENVIRONMENT: no host ICE candidates; installed Chromium disables non-proxied UDP. RTP was NOT validated.
+  ---
+  duration_ms: 2894.495895
+  type: 'test'
+  ...
+# Subtest: SDP must be bidirectional regardless of join order a-b
+ok 14 - SDP must be bidirectional regardless of join order a-b
+  ---
+  duration_ms: 4064.886378
+  type: 'test'
+  ...
+# Subtest: SDP must be bidirectional regardless of join order b-a
+ok 15 - SDP must be bidirectional regardless of join order b-a
+  ---
+  duration_ms: 4126.56298
+  type: 'test'
+  ...
+# Subtest: ontrack must retain both offered video MIDs before media begins
+ok 16 - ontrack must retain both offered video MIDs before media begins
+  ---
+  duration_ms: 4328.518157
+  type: 'test'
+  ...
+# Subtest: control binding answerer to offered transceivers negotiates sendrecv
+ok 17 - control binding answerer to offered transceivers negotiates sendrecv
+  ---
+  duration_ms: 2325.799518
+  type: 'test'
+  ...
+# Subtest: three participant SDP mesh must negotiate two-way audio on all pairs
+ok 18 - three participant SDP mesh must negotiate two-way audio on all pairs
+  ---
+  duration_ms: 7686.123828
+  type: 'test'
+  ...
+# Subtest: camera activated during call must bind to negotiated sender
+ok 19 - camera activated during call must bind to negotiated sender
+  ---
+  duration_ms: 5803.691259
+  type: 'test'
+  ...
+# Subtest: muting while microphone repair awaits permission must keep new track disabled
+ok 20 - muting while microphone repair awaits permission must keep new track disabled
+  ---
+  duration_ms: 1861.62277
+  type: 'test'
+  ...
+# Subtest: lost initial answer is retried without changing peer generation
+ok 21 - lost initial answer is retried without changing peer generation
+  ---
+  duration_ms: 4980.015945
+  type: 'test'
+  ...
+# Subtest: peer recovery replaces both generations without orphan transceivers
+ok 22 - peer recovery replaces both generations without orphan transceivers
+  ---
+  duration_ms: 2319.924522
+  type: 'test'
+  ...
+# Subtest: concurrent room switches preserve the latest requested room
+ok 23 - concurrent room switches preserve the latest requested room
+  ---
+  duration_ms: 1616.377256
+  type: 'test'
+  ...
+# Subtest: diagnostics handles an answerer waiting for its first offer
+ok 24 - diagnostics handles an answerer waiting for its first offer
+  ---
+  duration_ms: 1380.221974
+  type: 'test'
+  ...
+# Subtest: stopping camera while permission is pending cancels its capture
+ok 25 - stopping camera while permission is pending cancels its capture
+  ---
+  duration_ms: 2074.026553
+  type: 'test'
+  ...
+# (node:29577) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: TURN rejects GET
+ok 26 - TURN rejects GET
+  ---
+  duration_ms: 142.306242
+  type: 'test'
+  ...
+# Subtest: TURN requires user claim
+ok 27 - TURN requires user claim
+  ---
+  duration_ms: 6.820614
+  type: 'test'
+  ...
+# Subtest: TURN requires club membership
+ok 28 - TURN requires club membership
+  ---
+  duration_ms: 4.376649
+  type: 'test'
+  ...
+# Subtest: TURN fails closed on membership query error
+ok 29 - TURN fails closed on membership query error
+  ---
+  duration_ms: 4.326828
+  type: 'test'
+  ...
+# Subtest: TURN reports missing hosted secrets
+ok 30 - TURN reports missing hosted secrets
+  ---
+  duration_ms: 3.999593
+  type: 'test'
+  ...
+# Subtest: TURN handles upstream failure
+ok 31 - TURN handles upstream failure
+  ---
+  duration_ms: 8.760131
+  type: 'test'
+  ...
+# Subtest: TURN handles upstream timeout
+ok 32 - TURN handles upstream timeout
+  ---
+  duration_ms: 2.867005
+  type: 'test'
+  ...
+# Subtest: TURN rejects empty server list
+ok 33 - TURN rejects empty server list
+  ---
+  duration_ms: 4.441958
+  type: 'test'
+  ...
+# Subtest: TURN rejects missing TURN credentials
+ok 34 - TURN rejects missing TURN credentials
+  ---
+  duration_ms: 3.722951
+  type: 'test'
+  ...
+# Subtest: TURN returns temporary servers without caching and preserves TTL
+ok 35 - TURN returns temporary servers without caching and preserves TTL
+  ---
+  duration_ms: 5.712752
+  type: 'test'
+  ...
+1..35
+# tests 35
+# suites 0
+# pass 29
+# fail 0
+# cancelled 0
+# skipped 6
+# todo 0
+# duration_ms 69556.098909

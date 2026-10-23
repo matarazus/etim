@@ -1,0 +1,7 @@
+{
+  "name": "etim-webrtc-audit",
+  "private": true,
+  "engines": {"node": ">=24"},
+  "scripts": {"test": "node --test --test-concurrency=1 audit.test.cjs turn.test.cjs"},
+  "devDependencies": {"playwright": "1.62.1"}
+}

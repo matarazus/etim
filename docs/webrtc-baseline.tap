@@ -1,0 +1,368 @@
+TAP version 13
+# Subtest: two-way audio join a-b
+ok 1 - two-way audio join a-b # SKIP ENVIRONMENT: no host ICE candidates; installed Chromium disables non-proxied UDP. RTP was NOT validated.
+  ---
+  duration_ms: 2060.166524
+  type: 'test'
+  ...
+# Subtest: two-way audio join b-a
+ok 2 - two-way audio join b-a # SKIP ENVIRONMENT: no host ICE candidates; installed Chromium disables non-proxied UDP. RTP was NOT validated.
+  ---
+  duration_ms: 2047.96658
+  type: 'test'
+  ...
+# Subtest: answerer binds exactly three sendrecv transceivers
+not ok 3 - answerer binds exactly three sendrecv transceivers
+  ---
+  duration_ms: 2785.820698
+  type: 'test'
+  location: '/workspace/etim/tests/webrtc/audit.test.cjs:23:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    b: extra orphan transceivers
+    
+    6 !== 3
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 3
+  actual: 6
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/workspace/etim/tests/webrtc/audit.test.cjs:27:12)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+  ...
+# Subtest: camera started by answerer delivers decoded frames
+ok 4 - camera started by answerer delivers decoded frames # SKIP ENVIRONMENT: no host ICE candidates; installed Chromium disables non-proxied UDP. RTP was NOT validated.
+  ---
+  duration_ms: 1960.699047
+  type: 'test'
+  ...
+# Subtest: offerer camera and screen have distinct correctly mapped receivers
+ok 5 - offerer camera and screen have distinct correctly mapped receivers # SKIP ENVIRONMENT: no host ICE candidates; installed Chromium disables non-proxied UDP. RTP was NOT validated.
+  ---
+  duration_ms: 2326.784861
+  type: 'test'
+  ...
+# Subtest: three participants receive audio from both other participants
+ok 6 - three participants receive audio from both other participants # SKIP ENVIRONMENT: no host ICE candidates; installed Chromium disables non-proxied UDP. RTP was NOT validated.
+  ---
+  duration_ms: 2816.505605
+  type: 'test'
+  ...
+# Subtest: normal leave stops local media and removes remote peer
+ok 7 - normal leave stops local media and removes remote peer
+  ---
+  duration_ms: 2750.240017
+  type: 'test'
+  ...
+# Subtest: leave and rejoin establishes a new session and negotiated peer
+ok 8 - leave and rejoin establishes a new session and negotiated peer
+  ---
+  duration_ms: 3008.498087
+  type: 'test'
+  ...
+# Subtest: screen permission resolving after leave must stop capture
+not ok 9 - screen permission resolving after leave must stop capture
+  ---
+  duration_ms: 1859.641694
+  type: 'test'
+  location: '/workspace/etim/tests/webrtc/audit.test.cjs:81:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    capture must not survive leaving
+    
+    'live' !== 'ended'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'ended'
+  actual: 'live'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/workspace/etim/tests/webrtc/audit.test.cjs:90:10)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+  ...
+# Subtest: camera permission from old room must not publish in new room
+not ok 10 - camera permission from old room must not publish in new room
+  ---
+  duration_ms: 1903.931575
+  type: 'test'
+  location: '/workspace/etim/tests/webrtc/audit.test.cjs:94:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    old request must be cancelled
+    
+    'live' !== 'ended'
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'ended'
+  actual: 'live'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/workspace/etim/tests/webrtc/audit.test.cjs:103:10)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+  ...
+# Subtest: queued signal must be revalidated after room session changes
+not ok 11 - queued signal must be revalidated after room session changes
+  ---
+  duration_ms: 1582.698621
+  type: 'test'
+  location: '/workspace/etim/tests/webrtc/audit.test.cjs:107:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    old queued offer must not create a peer in a new session
+    
+    true !== false
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: false
+  actual: true
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/workspace/etim/tests/webrtc/audit.test.cjs:119:10)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+  ...
+# Subtest: presence must not create peer connections before TURN resolves
+not ok 12 - presence must not create peer connections before TURN resolves
+  ---
+  duration_ms: 2214.225163
+  type: 'test'
+  location: '/workspace/etim/tests/webrtc/audit.test.cjs:122:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    presence sync created a STUN-only PC while TURN loading
+    
+    1 !== 0
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 0
+  actual: 1
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/workspace/etim/tests/webrtc/audit.test.cjs:131:10)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+  ...
+# Subtest: lost renegotiation answer must not permanently wedge connected peer
+ok 13 - lost renegotiation answer must not permanently wedge connected peer # SKIP ENVIRONMENT: no host ICE candidates; installed Chromium disables non-proxied UDP. RTP was NOT validated.
+  ---
+  duration_ms: 1817.81477
+  type: 'test'
+  ...
+# Subtest: SDP must be bidirectional regardless of join order a-b
+not ok 14 - SDP must be bidirectional regardless of join order a-b
+  ---
+  duration_ms: 2252.047332
+  type: 'test'
+  location: '/workspace/etim/tests/webrtc/audit.test.cjs:146:42'
+  failureType: 'testCodeFailure'
+  error: |-
+    offerer audio became sendonly
+    + actual - expected
+    
+    + 'sendonly'
+    - 'sendrecv'
+           ^
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'sendrecv'
+  actual: 'sendonly'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/workspace/etim/tests/webrtc/audit.test.cjs:149:10)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+  ...
+# Subtest: SDP must be bidirectional regardless of join order b-a
+not ok 15 - SDP must be bidirectional regardless of join order b-a
+  ---
+  duration_ms: 2191.95169
+  type: 'test'
+  location: '/workspace/etim/tests/webrtc/audit.test.cjs:146:42'
+  failureType: 'testCodeFailure'
+  error: |-
+    offerer audio became sendonly
+    + actual - expected
+    
+    + 'sendonly'
+    - 'sendrecv'
+           ^
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 'sendrecv'
+  actual: 'sendonly'
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/workspace/etim/tests/webrtc/audit.test.cjs:149:10)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+  ...
+# Subtest: ontrack must retain both offered video MIDs before media begins
+not ok 16 - ontrack must retain both offered video MIDs before media begins
+  ---
+  duration_ms: 2239.770888
+  type: 'test'
+  location: '/workspace/etim/tests/webrtc/audit.test.cjs:153:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    offered screen receiver not classified as screen
+    
+    0 !== 1
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: 1
+  actual: 0
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/workspace/etim/tests/webrtc/audit.test.cjs:156:10)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+  ...
+# Subtest: control binding answerer to offered transceivers negotiates sendrecv
+ok 17 - control binding answerer to offered transceivers negotiates sendrecv
+  ---
+  duration_ms: 1176.375794
+  type: 'test'
+  ...
+# Subtest: three participant SDP mesh must negotiate two-way audio on all pairs
+not ok 18 - three participant SDP mesh must negotiate two-way audio on all pairs
+  ---
+  duration_ms: 3101.455838
+  type: 'test'
+  location: '/workspace/etim/tests/webrtc/audit.test.cjs:183:1'
+  failureType: 'testCodeFailure'
+  error: 'a: mesh contains one-way audio'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (/workspace/etim/tests/webrtc/audit.test.cjs:188:12)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+  ...
+# Subtest: camera activated during call must bind to negotiated sender
+not ok 19 - camera activated during call must bind to negotiated sender
+  ---
+  duration_ms: 2211.401398
+  type: 'test'
+  location: '/workspace/etim/tests/webrtc/audit.test.cjs:192:1'
+  failureType: 'testCodeFailure'
+  error: 'a: live camera attached to unnegotiated sender'
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: true
+  actual: false
+  operator: '=='
+  stack: |-
+    TestContext.<anonymous> (/workspace/etim/tests/webrtc/audit.test.cjs:199:12)
+    runNextTicks (node:internal/process/task_queues:65:5)
+    process.processImmediate (node:internal/timers:502:9)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+  ...
+# Subtest: muting while microphone repair awaits permission must keep new track disabled
+not ok 20 - muting while microphone repair awaits permission must keep new track disabled
+  ---
+  duration_ms: 1249.597323
+  type: 'test'
+  location: '/workspace/etim/tests/webrtc/audit.test.cjs:203:1'
+  failureType: 'testCodeFailure'
+  error: |-
+    UI says muted but replacement microphone is enabled
+    
+    true !== false
+    
+  code: 'ERR_ASSERTION'
+  name: 'AssertionError'
+  expected: false
+  actual: true
+  operator: 'strictEqual'
+  stack: |-
+    TestContext.<anonymous> (/workspace/etim/tests/webrtc/audit.test.cjs:214:42)
+    async Test.run (node:internal/test_runner/test:1389:7)
+    async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+  ...
+# (node:18737) ExperimentalWarning: stripTypeScriptTypes is an experimental feature and might change at any time
+# (Use `node --trace-warnings ...` to show where the warning was created)
+# Subtest: TURN rejects GET
+ok 21 - TURN rejects GET
+  ---
+  duration_ms: 97.797468
+  type: 'test'
+  ...
+# Subtest: TURN requires user claim
+ok 22 - TURN requires user claim
+  ---
+  duration_ms: 1.778105
+  type: 'test'
+  ...
+# Subtest: TURN requires club membership
+ok 23 - TURN requires club membership
+  ---
+  duration_ms: 1.964873
+  type: 'test'
+  ...
+# Subtest: TURN fails closed on membership query error
+ok 24 - TURN fails closed on membership query error
+  ---
+  duration_ms: 1.680113
+  type: 'test'
+  ...
+# Subtest: TURN reports missing hosted secrets
+ok 25 - TURN reports missing hosted secrets
+  ---
+  duration_ms: 2.486545
+  type: 'test'
+  ...
+# Subtest: TURN handles upstream failure
+ok 26 - TURN handles upstream failure
+  ---
+  duration_ms: 4.681063
+  type: 'test'
+  ...
+# Subtest: TURN handles upstream timeout
+ok 27 - TURN handles upstream timeout
+  ---
+  duration_ms: 1.650542
+  type: 'test'
+  ...
+# Subtest: TURN rejects empty server list
+ok 28 - TURN rejects empty server list
+  ---
+  duration_ms: 3.19633
+  type: 'test'
+  ...
+# Subtest: TURN rejects missing TURN credentials
+ok 29 - TURN rejects missing TURN credentials
+  ---
+  duration_ms: 2.112743
+  type: 'test'
+  ...
+# Subtest: TURN returns temporary servers without caching and preserves TTL
+ok 30 - TURN returns temporary servers without caching and preserves TTL
+  ---
+  duration_ms: 5.189676
+  type: 'test'
+  ...
+1..30
+# tests 30
+# suites 0
+# pass 13
+# fail 11
+# cancelled 0
+# skipped 6
+# todo 0
+# duration_ms 44305.316802

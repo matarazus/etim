@@ -1,0 +1,1018 @@
+{
+  "summary": {
+    "tests": 30,
+    "passed": 13,
+    "failed": 11,
+    "skipped": 6,
+    "productionFilesModified": false,
+    "mediaTransportValidated": false,
+    "realSafariValidated": false
+  },
+  "scope": "Native Chromium SDP and app lifecycle; Supabase/Cloudflare boundaries and capture devices are test fixtures. No production account data. See AUDITORIA_WEBRTC.md.",
+  "observations": [
+    {
+      "name": "answerer binds exactly three sendrecv transceivers",
+      "head": "9f03c9d0f436e3bc3621f39fa4fc20e04663e12c",
+      "browser": "154.0.8037.57",
+      "createdAt": "2026-10-23T12:54:29.193Z",
+      "snapshots": {
+        "a": {
+          "room": "resenha",
+          "session": "96f9e1e9-b9a7-47eb-938a-c1692152bf2f",
+          "remoteCameras": [],
+          "remoteScreens": [],
+          "peers": [
+            {
+              "id": "b",
+              "callId": "30d5e63e-6994-40c5-9f00-482f34fd45de",
+              "connection": "new",
+              "signaling": "stable",
+              "transceivers": [
+                {
+                  "mid": "0",
+                  "kind": "audio",
+                  "direction": "sendrecv",
+                  "current": "sendonly",
+                  "senderTrack": "eec1d0a4-bc69-4af2-b42f-6db10db6211b",
+                  "senderReady": "live",
+                  "receiverTrack": "53f36cbe-42b6-4d6c-999c-0ffc84bbe1a3",
+                  "role": "audio"
+                },
+                {
+                  "mid": "1",
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": "sendonly",
+                  "receiverTrack": "d83b4f06-6f79-4d7a-9d3d-2de104de035c",
+                  "role": "camera"
+                },
+                {
+                  "mid": "2",
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": "sendonly",
+                  "receiverTrack": "7a0f8ddc-0864-4d5d-ba73-8c4924feb167",
+                  "role": "screen"
+                }
+              ],
+              "stats": [
+                {
+                  "type": "outbound-rtp",
+                  "kind": "audio",
+                  "mid": "0",
+                  "packets": 0,
+                  "bytes": 0
+                },
+                {
+                  "type": "outbound-rtp",
+                  "kind": "video",
+                  "mid": "2",
+                  "packets": 0,
+                  "bytes": 0,
+                  "frames": 0
+                },
+                {
+                  "type": "outbound-rtp",
+                  "kind": "video",
+                  "mid": "1",
+                  "packets": 0,
+                  "bytes": 0,
+                  "frames": 0
+                }
+              ],
+              "answerDirections": [
+                "a=recvonly",
+                "a=recvonly",
+                "a=recvonly"
+              ]
+            }
+          ]
+        },
+        "b": {
+          "room": "resenha",
+          "session": "7e9f2698-0415-4f64-bcfe-2ea958c3c65f",
+          "remoteCameras": [
+            {
+              "id": "a",
+              "mid": "2",
+              "active": false,
+              "track": "5635a959-6174-4b10-a120-51d3278dc5c5"
+            }
+          ],
+          "remoteScreens": [],
+          "peers": [
+            {
+              "id": "a",
+              "callId": "30d5e63e-6994-40c5-9f00-482f34fd45de",
+              "connection": "new",
+              "signaling": "stable",
+              "transceivers": [
+                {
+                  "mid": null,
+                  "kind": "audio",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "senderTrack": "e9f28049-c9ca-4756-8b44-c409ad431993",
+                  "senderReady": "live",
+                  "receiverTrack": "768df676-7dce-4254-bd8e-5a9d78ecb93e",
+                  "role": "audio"
+                },
+                {
+                  "mid": null,
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "receiverTrack": "1a965168-6104-404e-beb0-1313c9f44db7",
+                  "role": "camera"
+                },
+                {
+                  "mid": null,
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "receiverTrack": "f1c53344-137f-4c38-b52a-7503a0d1f340",
+                  "role": "screen"
+                },
+                {
+                  "mid": "0",
+                  "kind": "audio",
+                  "direction": "recvonly",
+                  "current": "recvonly",
+                  "receiverTrack": "cd820048-fb5b-4d01-b366-883e24ca84b8",
+                  "role": "unbound"
+                },
+                {
+                  "mid": "1",
+                  "kind": "video",
+                  "direction": "recvonly",
+                  "current": "recvonly",
+                  "receiverTrack": "1988bc44-b1cd-4ed3-a6c3-4343d445ae1f",
+                  "role": "unbound"
+                },
+                {
+                  "mid": "2",
+                  "kind": "video",
+                  "direction": "recvonly",
+                  "current": "recvonly",
+                  "receiverTrack": "5635a959-6174-4b10-a120-51d3278dc5c5",
+                  "role": "unbound"
+                }
+              ],
+              "stats": [],
+              "answerDirections": [
+                "a=sendrecv",
+                "a=sendrecv",
+                "a=sendrecv"
+              ]
+            }
+          ]
+        }
+      },
+      "signals": [
+        {
+          "event": "signal",
+          "kind": "hello",
+          "from": "b",
+          "to": "a",
+          "session": "7e9f2698-0415-4f64-bcfe-2ea958c3c65f",
+          "toSession": "96f9e1e9-b9a7-47eb-938a-c1692152bf2f"
+        },
+        {
+          "event": "signal",
+          "kind": "offer",
+          "from": "a",
+          "to": "b",
+          "connectionId": "30d5e63e-6994-40c5-9f00-482f34fd45de",
+          "session": "96f9e1e9-b9a7-47eb-938a-c1692152bf2f",
+          "toSession": "7e9f2698-0415-4f64-bcfe-2ea958c3c65f",
+          "directions": [
+            "a=sendrecv",
+            "a=sendrecv",
+            "a=sendrecv"
+          ]
+        },
+        {
+          "event": "signal",
+          "kind": "answer",
+          "from": "b",
+          "to": "a",
+          "connectionId": "30d5e63e-6994-40c5-9f00-482f34fd45de",
+          "session": "7e9f2698-0415-4f64-bcfe-2ea958c3c65f",
+          "toSession": "96f9e1e9-b9a7-47eb-938a-c1692152bf2f",
+          "directions": [
+            "a=recvonly",
+            "a=recvonly",
+            "a=recvonly"
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "ontrack must retain both offered video MIDs before media begins",
+      "head": "9f03c9d0f436e3bc3621f39fa4fc20e04663e12c",
+      "browser": "154.0.8037.57",
+      "createdAt": "2026-10-23T12:54:58.130Z",
+      "snapshots": {
+        "a": {
+          "room": "resenha",
+          "session": "f7d6b527-cd9c-447b-889c-c442dc0df90d",
+          "remoteCameras": [],
+          "remoteScreens": [],
+          "peers": [
+            {
+              "id": "b",
+              "callId": "6e96f429-4835-4e0c-a29d-d495ad101844",
+              "connection": "new",
+              "signaling": "stable",
+              "transceivers": [
+                {
+                  "mid": "0",
+                  "kind": "audio",
+                  "direction": "sendrecv",
+                  "current": "sendonly",
+                  "senderTrack": "9921db66-043a-42a4-9721-b739fa934548",
+                  "senderReady": "live",
+                  "receiverTrack": "d63a9878-e934-4a09-b67d-179156a9edd6",
+                  "role": "audio"
+                },
+                {
+                  "mid": "1",
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": "sendonly",
+                  "receiverTrack": "04978c9c-d118-4285-8cb3-56773951d549",
+                  "role": "camera"
+                },
+                {
+                  "mid": "2",
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": "sendonly",
+                  "receiverTrack": "73ddac17-4055-46eb-976f-f56b7747cebb",
+                  "role": "screen"
+                }
+              ],
+              "stats": [
+                {
+                  "type": "outbound-rtp",
+                  "kind": "audio",
+                  "mid": "0",
+                  "packets": 0,
+                  "bytes": 0
+                },
+                {
+                  "type": "outbound-rtp",
+                  "kind": "video",
+                  "mid": "2",
+                  "packets": 0,
+                  "bytes": 0,
+                  "frames": 0
+                },
+                {
+                  "type": "outbound-rtp",
+                  "kind": "video",
+                  "mid": "1",
+                  "packets": 0,
+                  "bytes": 0,
+                  "frames": 0
+                }
+              ],
+              "answerDirections": [
+                "a=recvonly",
+                "a=recvonly",
+                "a=recvonly"
+              ]
+            }
+          ]
+        },
+        "b": {
+          "room": "resenha",
+          "session": "74164aa3-1626-415b-9ad2-9c69f94ecb9b",
+          "remoteCameras": [
+            {
+              "id": "a",
+              "mid": "2",
+              "active": false,
+              "track": "8f68a4ad-7ede-4083-b66f-21b301312bd5"
+            }
+          ],
+          "remoteScreens": [],
+          "peers": [
+            {
+              "id": "a",
+              "callId": "6e96f429-4835-4e0c-a29d-d495ad101844",
+              "connection": "new",
+              "signaling": "stable",
+              "transceivers": [
+                {
+                  "mid": null,
+                  "kind": "audio",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "senderTrack": "a6359ea0-b550-4c4a-9ed7-c27c9986772a",
+                  "senderReady": "live",
+                  "receiverTrack": "1d411bea-61aa-4ef5-a4b4-e200cbaa02e6",
+                  "role": "audio"
+                },
+                {
+                  "mid": null,
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "receiverTrack": "9ea44376-da83-4f66-bd66-bbd061ccb0eb",
+                  "role": "camera"
+                },
+                {
+                  "mid": null,
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "receiverTrack": "4b11bd24-02b3-4cb3-8fd6-24aa58dde93a",
+                  "role": "screen"
+                },
+                {
+                  "mid": "0",
+                  "kind": "audio",
+                  "direction": "recvonly",
+                  "current": "recvonly",
+                  "receiverTrack": "5c8e8d32-7582-4721-b2bf-0e241114e7c3",
+                  "role": "unbound"
+                },
+                {
+                  "mid": "1",
+                  "kind": "video",
+                  "direction": "recvonly",
+                  "current": "recvonly",
+                  "receiverTrack": "e52509a7-304a-4dc8-b85c-4ef8e8cface4",
+                  "role": "unbound"
+                },
+                {
+                  "mid": "2",
+                  "kind": "video",
+                  "direction": "recvonly",
+                  "current": "recvonly",
+                  "receiverTrack": "8f68a4ad-7ede-4083-b66f-21b301312bd5",
+                  "role": "unbound"
+                }
+              ],
+              "stats": [],
+              "answerDirections": [
+                "a=sendrecv",
+                "a=sendrecv",
+                "a=sendrecv"
+              ]
+            }
+          ]
+        }
+      },
+      "signals": [
+        {
+          "event": "signal",
+          "kind": "hello",
+          "from": "b",
+          "to": "a",
+          "session": "74164aa3-1626-415b-9ad2-9c69f94ecb9b",
+          "toSession": "f7d6b527-cd9c-447b-889c-c442dc0df90d"
+        },
+        {
+          "event": "signal",
+          "kind": "offer",
+          "from": "a",
+          "to": "b",
+          "connectionId": "6e96f429-4835-4e0c-a29d-d495ad101844",
+          "session": "f7d6b527-cd9c-447b-889c-c442dc0df90d",
+          "toSession": "74164aa3-1626-415b-9ad2-9c69f94ecb9b",
+          "directions": [
+            "a=sendrecv",
+            "a=sendrecv",
+            "a=sendrecv"
+          ]
+        },
+        {
+          "event": "signal",
+          "kind": "answer",
+          "from": "b",
+          "to": "a",
+          "connectionId": "6e96f429-4835-4e0c-a29d-d495ad101844",
+          "session": "74164aa3-1626-415b-9ad2-9c69f94ecb9b",
+          "toSession": "f7d6b527-cd9c-447b-889c-c442dc0df90d",
+          "directions": [
+            "a=recvonly",
+            "a=recvonly",
+            "a=recvonly"
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "camera activated during call must bind to negotiated sender",
+      "head": "9f03c9d0f436e3bc3621f39fa4fc20e04663e12c",
+      "browser": "154.0.8037.57",
+      "createdAt": "2026-10-23T12:55:04.647Z",
+      "snapshots": {
+        "a": {
+          "room": "resenha",
+          "session": "c2e26737-32a0-40c0-9195-7ba44179e803",
+          "camera": [
+            {
+              "id": "f729eb1c-522e-438a-9548-2ee793bd9ad6",
+              "ready": "live"
+            }
+          ],
+          "remoteCameras": [],
+          "remoteScreens": [],
+          "peers": [
+            {
+              "id": "b",
+              "callId": "8b2c4e48-e2a6-4dc1-aadc-7cdb69b08d35",
+              "connection": "new",
+              "signaling": "have-local-offer",
+              "transceivers": [
+                {
+                  "mid": "0",
+                  "kind": "audio",
+                  "direction": "sendrecv",
+                  "current": "sendonly",
+                  "senderTrack": "f4ddd6ee-112e-447b-98f2-1d683150d4ba",
+                  "senderReady": "live",
+                  "receiverTrack": "7bdc6199-df28-4955-9c42-21fc4ea1c42b",
+                  "role": "audio"
+                },
+                {
+                  "mid": "1",
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": "sendonly",
+                  "senderTrack": "f729eb1c-522e-438a-9548-2ee793bd9ad6",
+                  "senderReady": "live",
+                  "receiverTrack": "e578f5ea-bb40-492a-b871-feaef93eb72e",
+                  "role": "camera"
+                },
+                {
+                  "mid": "2",
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": "sendonly",
+                  "receiverTrack": "6ff4c523-0200-483d-9ec1-123e7cfe89f3",
+                  "role": "screen"
+                }
+              ],
+              "stats": [
+                {
+                  "type": "outbound-rtp",
+                  "kind": "audio",
+                  "mid": "0",
+                  "packets": 0,
+                  "bytes": 0
+                },
+                {
+                  "type": "outbound-rtp",
+                  "kind": "video",
+                  "mid": "2",
+                  "packets": 0,
+                  "bytes": 0,
+                  "frames": 0
+                },
+                {
+                  "type": "outbound-rtp",
+                  "kind": "video",
+                  "mid": "1",
+                  "packets": 0,
+                  "bytes": 0,
+                  "frames": 0
+                }
+              ],
+              "answerDirections": [
+                "a=recvonly",
+                "a=recvonly",
+                "a=recvonly"
+              ]
+            }
+          ]
+        },
+        "b": {
+          "room": "resenha",
+          "session": "6f331090-c6e4-4a00-8961-5a859feb28a8",
+          "camera": [
+            {
+              "id": "a62dd60e-48ff-45b9-9ac0-3bb32691daa3",
+              "ready": "live"
+            }
+          ],
+          "remoteCameras": [
+            {
+              "id": "a",
+              "mid": "2",
+              "active": false,
+              "track": "1b3820bf-9eeb-4626-b09a-f2423b4f856a"
+            }
+          ],
+          "remoteScreens": [],
+          "peers": [
+            {
+              "id": "a",
+              "callId": "8b2c4e48-e2a6-4dc1-aadc-7cdb69b08d35",
+              "connection": "new",
+              "signaling": "stable",
+              "transceivers": [
+                {
+                  "mid": null,
+                  "kind": "audio",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "senderTrack": "bf452ed0-32a3-45ab-aaef-d995df38d4ae",
+                  "senderReady": "live",
+                  "receiverTrack": "185a8f3f-7198-4784-8a18-efdf0340eda2",
+                  "role": "audio"
+                },
+                {
+                  "mid": null,
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "senderTrack": "a62dd60e-48ff-45b9-9ac0-3bb32691daa3",
+                  "senderReady": "live",
+                  "receiverTrack": "5eeb7909-0fcc-4e80-ad68-1d90a63ad82c",
+                  "role": "camera"
+                },
+                {
+                  "mid": null,
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "receiverTrack": "2fe293c5-4b89-4a3e-935a-74bf77561475",
+                  "role": "screen"
+                },
+                {
+                  "mid": "0",
+                  "kind": "audio",
+                  "direction": "recvonly",
+                  "current": "recvonly",
+                  "receiverTrack": "b3f5b478-c2d2-49ca-9cbf-dd46be9c8f97",
+                  "role": "unbound"
+                },
+                {
+                  "mid": "1",
+                  "kind": "video",
+                  "direction": "recvonly",
+                  "current": "recvonly",
+                  "receiverTrack": "86c09793-59bd-4854-8983-42dc432979ff",
+                  "role": "unbound"
+                },
+                {
+                  "mid": "2",
+                  "kind": "video",
+                  "direction": "recvonly",
+                  "current": "recvonly",
+                  "receiverTrack": "1b3820bf-9eeb-4626-b09a-f2423b4f856a",
+                  "role": "unbound"
+                }
+              ],
+              "stats": [],
+              "answerDirections": [
+                "a=sendrecv",
+                "a=sendrecv",
+                "a=sendrecv"
+              ]
+            }
+          ]
+        }
+      },
+      "signals": [
+        {
+          "event": "signal",
+          "kind": "hello",
+          "from": "b",
+          "to": "a",
+          "session": "6f331090-c6e4-4a00-8961-5a859feb28a8",
+          "toSession": "c2e26737-32a0-40c0-9195-7ba44179e803"
+        },
+        {
+          "event": "signal",
+          "kind": "offer",
+          "from": "a",
+          "to": "b",
+          "connectionId": "f6059d55-3e20-4f45-b762-11226713fda8",
+          "session": "c2e26737-32a0-40c0-9195-7ba44179e803",
+          "toSession": "6f331090-c6e4-4a00-8961-5a859feb28a8",
+          "directions": [
+            "a=sendrecv",
+            "a=sendrecv",
+            "a=sendrecv"
+          ]
+        },
+        {
+          "event": "signal",
+          "kind": "answer",
+          "from": "b",
+          "to": "a",
+          "connectionId": "f6059d55-3e20-4f45-b762-11226713fda8",
+          "session": "6f331090-c6e4-4a00-8961-5a859feb28a8",
+          "toSession": "c2e26737-32a0-40c0-9195-7ba44179e803",
+          "directions": [
+            "a=recvonly",
+            "a=recvonly",
+            "a=recvonly"
+          ]
+        },
+        {
+          "event": "signal",
+          "kind": "media-update",
+          "from": "b",
+          "to": "a",
+          "session": "6f331090-c6e4-4a00-8961-5a859feb28a8",
+          "toSession": "c2e26737-32a0-40c0-9195-7ba44179e803"
+        },
+        {
+          "event": "signal",
+          "kind": "offer",
+          "from": "a",
+          "to": "b",
+          "connectionId": "1174cc93-135b-408c-b33b-3f3b091e6fd4",
+          "session": "c2e26737-32a0-40c0-9195-7ba44179e803",
+          "toSession": "6f331090-c6e4-4a00-8961-5a859feb28a8",
+          "directions": [
+            "a=sendrecv",
+            "a=sendrecv",
+            "a=sendrecv"
+          ]
+        },
+        {
+          "event": "signal",
+          "kind": "answer",
+          "from": "b",
+          "to": "a",
+          "connectionId": "1174cc93-135b-408c-b33b-3f3b091e6fd4",
+          "session": "6f331090-c6e4-4a00-8961-5a859feb28a8",
+          "toSession": "c2e26737-32a0-40c0-9195-7ba44179e803",
+          "directions": [
+            "a=recvonly",
+            "a=recvonly",
+            "a=recvonly"
+          ]
+        },
+        {
+          "event": "signal",
+          "kind": "offer",
+          "from": "a",
+          "to": "b",
+          "connectionId": "8b2c4e48-e2a6-4dc1-aadc-7cdb69b08d35",
+          "session": "c2e26737-32a0-40c0-9195-7ba44179e803",
+          "toSession": "6f331090-c6e4-4a00-8961-5a859feb28a8",
+          "directions": [
+            "a=sendrecv",
+            "a=sendrecv",
+            "a=sendrecv"
+          ]
+        },
+        {
+          "event": "signal",
+          "kind": "answer",
+          "from": "b",
+          "to": "a",
+          "connectionId": "8b2c4e48-e2a6-4dc1-aadc-7cdb69b08d35",
+          "session": "6f331090-c6e4-4a00-8961-5a859feb28a8",
+          "toSession": "c2e26737-32a0-40c0-9195-7ba44179e803",
+          "directions": [
+            "a=recvonly",
+            "a=recvonly",
+            "a=recvonly"
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "presence must not create peer connections before TURN resolves",
+      "head": "9f03c9d0f436e3bc3621f39fa4fc20e04663e12c",
+      "browser": "154.0.8037.57",
+      "createdAt": "2026-10-23T12:54:49.652Z",
+      "snapshots": {
+        "a": {
+          "room": "resenha",
+          "session": "6ba33c6b-959e-46f5-880b-0d2b50e5f7da",
+          "remoteCameras": [],
+          "remoteScreens": [],
+          "peers": [
+            {
+              "id": "b",
+              "callId": "a5839841-c445-4089-bd02-a2eb6b96f554",
+              "connection": "new",
+              "signaling": "have-local-offer",
+              "transceivers": [
+                {
+                  "mid": "0",
+                  "kind": "audio",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "senderTrack": "7bda7ce6-eb5c-4dbc-8b69-faf1c3fd2606",
+                  "senderReady": "live",
+                  "receiverTrack": "22897cad-960e-4eee-9847-125b679267e8",
+                  "role": "audio"
+                },
+                {
+                  "mid": "1",
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "receiverTrack": "318cf329-33dd-44d5-8881-f8067f4c58c9",
+                  "role": "camera"
+                },
+                {
+                  "mid": "2",
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "receiverTrack": "eadcfdc9-72c0-4a65-ad05-1a361a5ca2c5",
+                  "role": "screen"
+                }
+              ],
+              "stats": [],
+              "answerDirections": []
+            }
+          ]
+        },
+        "b": {
+          "room": "resenha",
+          "session": "750f68cd-506a-4a1f-91b0-855ba8890eda",
+          "remoteCameras": [
+            {
+              "id": "a",
+              "mid": "2",
+              "active": false,
+              "track": "9c00f0e6-0257-4b4c-ad0b-fea55ec252f4"
+            }
+          ],
+          "remoteScreens": [],
+          "peers": [
+            {
+              "id": "a",
+              "callId": "a5839841-c445-4089-bd02-a2eb6b96f554",
+              "connection": "new",
+              "signaling": "have-remote-offer",
+              "transceivers": [
+                {
+                  "mid": null,
+                  "kind": "audio",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "senderTrack": "31a04ab9-58cb-4498-8093-f2b05f0d3020",
+                  "senderReady": "live",
+                  "receiverTrack": "66f5f48c-c5ac-4bc8-9aed-4b083f496eff",
+                  "role": "audio"
+                },
+                {
+                  "mid": null,
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "receiverTrack": "a081c3eb-dc86-4412-be87-23b305e7d5e9",
+                  "role": "camera"
+                },
+                {
+                  "mid": null,
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "receiverTrack": "469eb6c7-9bd7-4bc3-a6e0-d6d7c44cfd4a",
+                  "role": "screen"
+                },
+                {
+                  "mid": "0",
+                  "kind": "audio",
+                  "direction": "recvonly",
+                  "current": null,
+                  "receiverTrack": "2d69e9cb-e9e3-450f-aae9-9e6f1eb0d098",
+                  "role": "unbound"
+                },
+                {
+                  "mid": "1",
+                  "kind": "video",
+                  "direction": "recvonly",
+                  "current": null,
+                  "receiverTrack": "ba2b48ce-1696-42a8-aa21-ea10673c9a48",
+                  "role": "unbound"
+                },
+                {
+                  "mid": "2",
+                  "kind": "video",
+                  "direction": "recvonly",
+                  "current": null,
+                  "receiverTrack": "9c00f0e6-0257-4b4c-ad0b-fea55ec252f4",
+                  "role": "unbound"
+                }
+              ],
+              "stats": [],
+              "answerDirections": [
+                "a=sendrecv",
+                "a=sendrecv",
+                "a=sendrecv"
+              ]
+            }
+          ]
+        }
+      },
+      "signals": [
+        {
+          "event": "signal",
+          "kind": "hello",
+          "from": "b",
+          "to": "a",
+          "session": "750f68cd-506a-4a1f-91b0-855ba8890eda",
+          "toSession": "6ba33c6b-959e-46f5-880b-0d2b50e5f7da"
+        },
+        {
+          "event": "signal",
+          "kind": "offer",
+          "from": "a",
+          "to": "b",
+          "connectionId": "a5839841-c445-4089-bd02-a2eb6b96f554",
+          "session": "6ba33c6b-959e-46f5-880b-0d2b50e5f7da",
+          "toSession": "750f68cd-506a-4a1f-91b0-855ba8890eda",
+          "directions": [
+            "a=sendrecv",
+            "a=sendrecv",
+            "a=sendrecv"
+          ]
+        },
+        {
+          "event": "signal",
+          "kind": "answer",
+          "from": "b",
+          "to": "a",
+          "connectionId": "a5839841-c445-4089-bd02-a2eb6b96f554",
+          "session": "750f68cd-506a-4a1f-91b0-855ba8890eda",
+          "toSession": "6ba33c6b-959e-46f5-880b-0d2b50e5f7da",
+          "directions": [
+            "a=recvonly",
+            "a=recvonly",
+            "a=recvonly"
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "screen permission resolving after leave must stop capture",
+      "head": "9f03c9d0f436e3bc3621f39fa4fc20e04663e12c",
+      "browser": "154.0.8037.57",
+      "createdAt": "2026-10-23T12:54:43.968Z",
+      "snapshots": {
+        "a": {
+          "room": null,
+          "session": null,
+          "screen": [
+            {
+              "id": "cd5b5aa9-9b7f-4555-be16-0aa6e43bf13c",
+              "ready": "live"
+            }
+          ],
+          "remoteCameras": [],
+          "remoteScreens": [],
+          "peers": []
+        }
+      },
+      "signals": [
+        {
+          "event": "voice-presence",
+          "kind": "leave",
+          "from": "a",
+          "session": "7bb51111-e4ca-40e9-aa33-504f8f844762"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "camera permission from old room must not publish in new room",
+      "head": "9f03c9d0f436e3bc3621f39fa4fc20e04663e12c",
+      "browser": "154.0.8037.57",
+      "createdAt": "2026-10-23T12:54:45.883Z",
+      "snapshots": {
+        "a": {
+          "room": "jogatina",
+          "session": "8f242af0-09f1-44c7-a36d-a0655fa04195",
+          "camera": [
+            {
+              "id": "8fcec4ba-70a2-4522-81c2-d2087f9f42e2",
+              "ready": "live"
+            }
+          ],
+          "remoteCameras": [],
+          "remoteScreens": [],
+          "peers": []
+        }
+      },
+      "signals": [
+        {
+          "event": "voice-presence",
+          "kind": "leave",
+          "from": "a",
+          "session": "f970afa8-815f-4f38-b24d-13f9f5fffcf1"
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "queued signal must be revalidated after room session changes",
+      "head": "9f03c9d0f436e3bc3621f39fa4fc20e04663e12c",
+      "browser": "154.0.8037.57",
+      "createdAt": "2026-10-23T12:54:47.489Z",
+      "snapshots": {
+        "b": {
+          "room": "jogatina",
+          "session": "5da6cc99-f274-4daf-abd4-b4faed861134",
+          "remoteCameras": [],
+          "remoteScreens": [],
+          "peers": [
+            {
+              "id": "a",
+              "callId": "old-call",
+              "connection": "new",
+              "signaling": "stable",
+              "transceivers": [
+                {
+                  "mid": null,
+                  "kind": "audio",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "senderTrack": "6e027d12-21bb-4c0c-af82-6e86ff565f7f",
+                  "senderReady": "live",
+                  "receiverTrack": "05b36282-0643-4f64-9de5-752b6863a17d",
+                  "role": "audio"
+                },
+                {
+                  "mid": null,
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "receiverTrack": "fef88ed3-b06b-4be6-b140-d167537b9fb9",
+                  "role": "camera"
+                },
+                {
+                  "mid": null,
+                  "kind": "video",
+                  "direction": "sendrecv",
+                  "current": null,
+                  "receiverTrack": "0bf5c6ee-eb0f-45cb-bab5-b1b85f119d2b",
+                  "role": "screen"
+                },
+                {
+                  "mid": "0",
+                  "kind": "audio",
+                  "direction": "recvonly",
+                  "current": "recvonly",
+                  "receiverTrack": "f9344380-8658-4da3-ae53-4799782c6eab",
+                  "role": "unbound"
+                }
+              ],
+              "stats": [],
+              "answerDirections": [
+                "a=sendrecv"
+              ]
+            }
+          ]
+        }
+      },
+      "signals": [
+        {
+          "event": "voice-presence",
+          "kind": "leave",
+          "from": "b",
+          "session": "f05705f3-f6fc-46de-97c9-58733b777059"
+        },
+        {
+          "event": "signal",
+          "kind": "answer",
+          "from": "b",
+          "to": "a",
+          "connectionId": "old-call",
+          "session": "5da6cc99-f274-4daf-abd4-b4faed861134",
+          "toSession": null,
+          "directions": [
+            "a=recvonly"
+          ]
+        }
+      ],
+      "errors": []
+    },
+    {
+      "name": "muting while microphone repair awaits permission must keep new track disabled",
+      "head": "9f03c9d0f436e3bc3621f39fa4fc20e04663e12c",
+      "browser": "154.0.8037.57",
+      "createdAt": "2026-10-23T12:55:05.959Z",
+      "snapshots": {
+        "a": {
+          "room": "resenha",
+          "session": "bf77324d-8d69-41e2-9cd3-81b22dfc3b67",
+          "remoteCameras": [],
+          "remoteScreens": [],
+          "peers": []
+        }
+      },
+      "signals": [],
+      "errors": []
+    }
+  ]
+}
