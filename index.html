@@ -23,12 +23,12 @@
     </aside>
 
     <aside class="sidebar" id="sidebar" aria-label="Canais">
-      <div class="workspace-head"><div><span class="eyebrow">SEU ESPAÇO</span><div class="workspace-title">etim<span class="title-star">✳</span><span class="chevron-small" data-icon="chevron-down"></span></div></div><div class="head-pill" title="Seu grupo"><span data-icon="users"></span></div></div>
+      <div class="workspace-head"><div><span class="eyebrow">SEU ESPAÇO</span><div class="workspace-title"><span id="groupDisplayName">etim</span><span class="title-star">✳</span><span class="chevron-small" data-icon="chevron-down"></span></div></div><button type="button" class="head-pill" id="workspaceSettings" title="Personalizar espaço" aria-label="Personalizar espaço">⋯</button></div>
       <div class="sidebar-scroll">
-        <div class="space-card"><div class="space-orbit"><span>✦</span></div><div><strong>Um lugar só nosso.</strong><small>Para conversar, jogar e ficar de boa.</small></div></div>
-        <div class="section-row"><span>CANAIS DE TEXTO</span><button id="addChannel" title="Canais predefinidos nesta versão" aria-label="Adicionar canal">+</button></div>
+        <div class="space-card"><div class="space-orbit"><span>✦</span></div><div><strong>Um lugar só nosso.</strong><small id="groupDescription">Para conversar, jogar e ficar de boa.</small></div></div>
+        <div class="section-row"><span>CANAIS DE TEXTO</span><button id="addChannel" title="Criar canal de texto" aria-label="Adicionar canal">+</button></div>
         <nav class="channel-list" id="textChannels" aria-label="Canais de texto"></nav>
-        <div class="section-row voice-heading"><span>SALAS DE VOZ</span><span class="section-icon" data-icon="headphones"></span></div>
+        <div class="section-row voice-heading"><span>SALAS DE VOZ</span><button id="addVoiceChannel" title="Criar sala de voz" aria-label="Adicionar sala de voz">+</button></div>
         <nav class="channel-list" id="voiceChannels" aria-label="Salas de voz"></nav>
         <div class="sidebar-tip"><span class="tip-icon" data-icon="sparkles"></span><div><b>Sua galera, seu espaço</b><p>Um cantinho com a nossa cara, longe da bagunça.</p></div></div>
       </div>

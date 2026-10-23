@@ -107,3 +107,26 @@ button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid #b6
   .stage-controls button{min-height:40px}
 }
 
+/* Edição compartilhada e Jam: mesmos tons e componentes do etim. */
+.channel-row{display:flex;align-items:center;gap:2px;min-width:0}
+.channel-row .channel-button{flex:1;min-width:0}
+.channel-row .channel-button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.channel-options{flex-shrink:0;width:32px;min-height:36px;border:0;border-radius:7px;background:transparent;color:#b1a9c9;font-size:20px}
+.channel-options:hover{background:#393448;color:#fff}
+.channel-description{display:block;padding:0 12px 6px 35px;font-size:10px;color:#9d97af;overflow-wrap:anywhere}
+.workspace-title{min-width:0}
+#groupDisplayName{max-width:155px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#workspaceSettings{color:#c3b9e3;flex-shrink:0;font-size:20px}
+#groupDescription{overflow-wrap:anywhere}
+.call-tools{width:100%;font-size:11px;color:#c8bedf}
+.call-tools summary{cursor:pointer;padding:7px 2px;width:fit-content}
+.call-tools>div{display:flex;gap:7px;flex-wrap:wrap;padding:6px 0}
+.stage-controls .jam-active{border-color:#738e81;color:#c6e8d2}
+.external-action{display:block;text-align:center;text-decoration:none}
+.jam-instructions{margin-top:20px;font-size:13px;color:#c9bfdc}
+.jam-instructions summary{cursor:pointer;padding:8px 0}
+.jam-instructions p{margin:10px 0}
+.modal .danger{background:#693a4b;border-color:#92556c;color:#ffdae4}
+button:disabled{opacity:.55;cursor:not-allowed}
+
+.banner-duration{display:block;margin-top:3px;color:#b6accd;font-size:10px}
