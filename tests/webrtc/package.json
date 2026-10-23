@@ -1,7 +1,14 @@
 {
   "name": "etim-webrtc-audit",
   "private": true,
-  "engines": {"node": ">=24"},
-  "scripts": {"test": "node --test --test-concurrency=1 audit.test.cjs turn.test.cjs"},
-  "devDependencies": {"playwright": "1.62.1"}
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 audit.test.cjs turn.test.cjs features.test.cjs database.test.cjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.5.11",
+    "playwright": "1.62.1"
+  }
 }
