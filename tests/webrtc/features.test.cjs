@@ -78,7 +78,7 @@ test('duration survives media/chat/rerenders and clears its single timer on leav
 });
 test('native RTP repeated camera/screen cycles keep audio and peer connection',{timeout:60000},async t=>{
  const lab=await createLab(t);if(!await lab.requireTransport())return;await lab.join('a');await lab.join('b');await lab.connected();const a=lab.pages.get('a'),b=lab.pages.get('b');
- await a.evaluate(()=>window.originalPeer=audit.state.peers.get('b'));
+ await a.evaluate(()=>{audit.openMedia();window.originalPeer=audit.state.peers.get('b')});
  for(let i=0;i<3;i++){
    await b.evaluate(()=>audit.startCamera());await a.locator('#cam-b').waitFor({state:'visible'});await b.evaluate(()=>audit.startScreen());await a.locator('#remote-b').waitFor({state:'visible'});
    await b.evaluate(()=>audit.stopCamera());await a.locator('#cam-b').waitFor({state:'detached'});assert.equal(await a.locator('#remote-b').isVisible(),true);
