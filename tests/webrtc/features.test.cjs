@@ -40,7 +40,16 @@ test('presence off removes frozen frames without mute; mute/unmute/ended and ses
 });
 test('focus/grid preserve proportional players on desktop/mobile; no frames stays hidden',async t=>{
  const lab=await createLab(t,['a']);await lab.join('a');const p=lab.pages.get('a');
- for(const id of ['b','c','d','e'])await addVideo(p,id);await addVideo(p,'b','screen');
+ for(const [index,id] of ['b','c','d','e'].entries()){
+   await addVideo(p,id);
+   await p.waitForFunction(count=>document.querySelectorAll('.video-tile:not(.awaiting-frame)').length===count,index+1);
+   const boxes=await p.locator('.video-tile:not(.awaiting-frame)').evaluateAll(tiles=>tiles.map(t=>{const r=t.getBoundingClientRect();return {x:r.x,y:r.y,right:r.right,bottom:r.bottom,width:r.width,height:r.height}}));
+   assert.equal(boxes.length,index+1,'grid must include each active transmission');
+   for(let i=0;i<boxes.length;i++)for(let j=i+1;j<boxes.length;j++){
+     const a=boxes[i],b=boxes[j];assert.ok(a.right<=b.x+1||b.right<=a.x+1||a.bottom<=b.y+1||b.bottom<=a.y+1,'grid tiles must not overlap');
+   }
+ }
+ await addVideo(p,'b','screen');
  await p.waitForFunction(()=>document.querySelectorAll('.video-tile:not(.awaiting-frame)').length===5);
  for(const width of [1440,390]){
    await p.setViewportSize({width,height:900});await p.locator('[data-focus-video="cam-b"]').click();
